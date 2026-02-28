@@ -2,8 +2,10 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 import yfinance as yf
+import time
 from fastapi import HTTPException
 from typing import List, Optional
+
 
 def fetch_benchmark_returns(ticker: str, start_date: str, end_date: str) -> pd.Series:
     """
@@ -14,18 +16,27 @@ def fetch_benchmark_returns(ticker: str, start_date: str, end_date: str) -> pd.S
         # Add a small buffer before start_date so returns on the first day are calculatable
         start_buffer = (pd.to_datetime(start_date) - pd.Timedelta(days=5)).strftime('%Y-%m-%d')
 
-        # auto_adjust=True (default in 0.2.x) folds Adj Close into Close
-        df = yf.download(
-            ticker,
-            start=start_buffer,
-            end=end_date,
-            progress=False,
-            auto_adjust=True   # 'Close' = adjusted; no 'Adj Close' column
-        )
+        # Retry with exponential backoff — yfinance rate limits quickly under load
+        max_retries = 3
+        df = None
+        for attempt in range(max_retries):
+            df = yf.download(
+                ticker,
+                start=start_buffer,
+                end=end_date,
+                progress=False,
+                auto_adjust=True
+            )
+            if df is not None and not df.empty:
+                break
+            # Rate limited or transient failure — wait before retrying
+            wait = 2 ** attempt  # 1s, 2s, 4s
+            time.sleep(wait)
 
         if df is None or df.empty:
-            raise ValueError(f"No price data found for benchmark ticker: '{ticker}'. "
-                             "Verify the ticker is correct and has data for the selected date range.")
+            raise ValueError(f"No price data returned for ticker: '{ticker}'. "
+                             "This may be due to Yahoo Finance rate limiting. "
+                             "Please wait a few seconds and try again.")
 
         # --- Robust column extraction (handles MultiIndex from yfinance 0.2.x) ---
         if isinstance(df.columns, pd.MultiIndex):
