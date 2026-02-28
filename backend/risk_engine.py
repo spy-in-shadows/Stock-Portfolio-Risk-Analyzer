@@ -358,23 +358,20 @@ def get_risk_metrics(
     z_score       = norm.ppf(1 - confidence_level)
     parametric_var = port_return + z_score * port_vol
 
-    # ── Monte Carlo VaR (Cholesky for correlation preservation) ─────
-    try:
-        L = np.linalg.cholesky(cov_matrix.values)
-    except np.linalg.LinAlgError:
-        L = np.linalg.cholesky(cov_matrix.values + np.eye(len(cov_matrix)) * 1e-9)
-
-    Z = np.random.standard_normal((simulations, len(weights)))
-    sim_returns  = mean_returns.values + np.dot(Z, L.T)
-    port_sim_ret = np.dot(sim_returns, weights)
-    mc_var       = float(np.percentile(port_sim_ret, (1 - confidence_level) * 100))
+    # ── Monte Carlo 30-Day Simulation ──────────────────────────────
+    mc = monte_carlo_simulation(
+        mean=mean_returns.values,
+        cov=cov_matrix.values,
+        weights=weights,
+        simulations=simulations,
+        horizon_days=30
+    )
 
     # ── Monte Carlo Forward Paths (for chart) ───────────────────────
     mc_chart_data = generate_mc_forward_paths(
-        mean_returns=mean_returns,
-        L=L,
+        mean=mean_returns.values,
+        cov=cov_matrix.values,
         weights=weights,
-        num_assets=len(weights),
         horizon=31,
         path_simulations=5000
     )
@@ -387,62 +384,125 @@ def get_risk_metrics(
     beta      = cov_rp_rm / var_rm if var_rm > 0 else 1.0
 
     return {
-        "portfolio_expected_return": port_return,
-        "portfolio_volatility":      port_vol,
-        "sharpe_ratio":              float(sharpe),
-        "historical_var_95":         hist_var,
-        "parametric_var_95":         float(parametric_var),
-        "monte_carlo_var_95":        mc_var,
-        "beta":                      float(beta),
-        "correlation_matrix":        corr_matrix.values.tolist(),
-        "asset_names":               asset_names,
-        "benchmark_ticker":          benchmark_ticker,
-        "mc_chart_data":             mc_chart_data
+        # Empirical daily metrics (from historical data)
+        "portfolio_expected_return":       port_return,
+        "portfolio_volatility":            port_vol,
+        "sharpe_ratio":                    float(sharpe),
+        "historical_var_95":               hist_var,
+        "parametric_var_95":               float(parametric_var),
+        # Monte Carlo 30-day compounded metrics
+        "monte_carlo_var_95":              mc["var95"],        # Alias for risk gauge compat
+        "monte_carlo_expected_return_30d": mc["expected"],
+        "monte_carlo_volatility_30d":      mc["volatility"],
+        "monte_carlo_sharpe_30d":          mc["sharpe"],
+        "monte_carlo_var95_30d":           mc["var95"],
+        # Meta
+        "beta":                            float(beta),
+        "correlation_matrix":              corr_matrix.values.tolist(),
+        "asset_names":                     asset_names,
+        "benchmark_ticker":                benchmark_ticker,
+        "mc_chart_data":                   mc_chart_data
+    }
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+# MODULE 6A: Monte Carlo Simulation — 30-Day Compounded
+# Proper multi-day compounding via multivariate_normal sampling.
+# ═══════════════════════════════════════════════════════════════════
+
+def monte_carlo_simulation(
+    mean: np.ndarray,
+    cov: np.ndarray,
+    weights: np.ndarray,
+    simulations: int = 10000,
+    horizon_days: int = 30
+) -> dict:
+    """
+    Runs a proper multi-day Monte Carlo simulation.
+
+    Step 1: Sample (simulations, horizon_days, num_assets) daily returns
+            from multivariate_normal(mean, cov).
+    Step 2: Compute portfolio daily returns via einsum.
+    Step 3: Compound across horizon_days → (simulations,) end-of-period returns.
+    Step 4: Extract expected, volatility, Sharpe, VaR95 from the terminal distribution.
+
+    No sqrt(T) scaling. No 1-day shortcut. Pure compounding.
+    """
+    # Step 1: Simulated daily asset returns — shape (simulations, horizon_days, num_assets)
+    simulated_daily = np.random.multivariate_normal(
+        mean=mean,
+        cov=cov,
+        size=(simulations, horizon_days)       # ← correct shape
+    )
+
+    # Step 2: Portfolio daily returns — shape (simulations, horizon_days)
+    portfolio_daily = np.einsum('ijk,k->ij', simulated_daily, weights)
+
+    # Step 3: 30-day compounded terminal return — shape (simulations,)
+    # prod(1 + r_t) - 1 over the horizon for each simulation path
+    simulated_end_returns = np.prod(1 + portfolio_daily, axis=1) - 1
+
+    # Step 4: Terminal distribution statistics
+    expected   = float(np.mean(simulated_end_returns))
+    volatility = float(np.std(simulated_end_returns))
+    sharpe     = expected / volatility if volatility > 0 else 0.0
+    var95      = float(np.percentile(simulated_end_returns, 5))
+
+    return {
+        "expected":   expected,
+        "volatility": volatility,
+        "sharpe":     sharpe,
+        "var95":      var95
     }
 
 
 # ═══════════════════════════════════════════════════════════════════
-# MODULE 6: Monte Carlo Forward Path Generator
-# Produces 31-day cumulative GBM paths for chart visualization.
+# MODULE 6B: Monte Carlo Forward Path Generator (Chart Visualization)
+# Produces per-day percentile bands using the same multivariate_normal.
 # ═══════════════════════════════════════════════════════════════════
 
 def generate_mc_forward_paths(
-    mean_returns: pd.Series,
-    L: np.ndarray,
+    mean: np.ndarray,
+    cov: np.ndarray,
     weights: np.ndarray,
-    num_assets: int,
     horizon: int = 31,
     path_simulations: int = 5000
 ) -> list:
     """
-    Multi-step forward GBM simulation with Cholesky-correlated shocks.
-    Returns a list of 32 dicts (T+0 to T+31) for direct chart consumption.
+    Multi-step compounding GBM paths for chart visualization.
+    Uses multivariate_normal directly — no Cholesky tensordot.
+    Returns a list of (horizon+1) dicts, one per day T+0 to T+horizon.
     """
-    # Daily correlated shocks: (horizon, path_simulations, num_assets)
-    Z_all = np.random.standard_normal((horizon, path_simulations, num_assets))
-    daily_asset_ret = mean_returns.values + np.tensordot(Z_all, L.T, axes=([2], [0]))
+    # Daily asset returns — shape (path_simulations, horizon, num_assets)
+    simulated_daily = np.random.multivariate_normal(
+        mean=mean,
+        cov=cov,
+        size=(path_simulations, horizon)
+    )
 
-    # Portfolio daily returns: (horizon, path_simulations)
-    daily_port_ret = np.dot(daily_asset_ret, weights)
+    # Portfolio daily returns — shape (path_simulations, horizon)
+    portfolio_daily = np.einsum('ijk,k->ij', simulated_daily, weights)
 
-    # Cumulative compounding: (horizon+1, path_simulations), base = 100
-    cumulative = np.vstack([
-        np.full((1, path_simulations), 100.0),
-        np.cumprod(1 + daily_port_ret, axis=0) * 100
-    ])
+    # Cumulative compounding — shape (path_simulations, horizon+1)
+    # Column 0 = 100 (start), columns 1..horizon = compounded values
+    ones_col    = np.ones((path_simulations, 1))
+    cum_factors = np.cumprod(np.hstack([ones_col, 1 + portfolio_daily]), axis=1)
+    cumulative  = cum_factors * 100.0    # Base portfolio value = 100
 
     result = []
     for t in range(horizon + 1):
-        day_vals = cumulative[t]
-        p10, p50, p90 = np.percentile(day_vals, [10, 50, 90])
+        day_vals = cumulative[:, t]             # shape (path_simulations,)
+        p5, p10, p50, p90 = np.percentile(day_vals, [5, 10, 50, 90])
 
         result.append({
-            "day": t,
-            "path1": round(float(day_vals[int(np.argmin(np.abs(day_vals - p50)))]), 4),  # Median
-            "path2": round(float(day_vals[int(np.argmin(np.abs(day_vals - p10)))]), 4),  # Stress
-            "path3": round(float(day_vals[int(np.argmin(np.abs(day_vals - p90)))]), 4),  # Bull
+            "day":    t,
+            "path1": round(float(day_vals[int(np.argmin(np.abs(day_vals - p50)))]), 4),  # Median path
+            "path2": round(float(day_vals[int(np.argmin(np.abs(day_vals - p10)))]), 4),  # Stress (P10)
+            "path3": round(float(day_vals[int(np.argmin(np.abs(day_vals - p90)))]), 4),  # Bull   (P90)
             "median": round(float(p50), 4),
-            "var95":  round(float(np.percentile(day_vals, 5)), 4),
+            "var95":  round(float(p5), 4),
             "confidenceBand": [round(float(p10), 4), round(float(p90), 4)]
         })
 

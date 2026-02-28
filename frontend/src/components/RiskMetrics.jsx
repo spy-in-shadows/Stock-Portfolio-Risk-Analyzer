@@ -83,10 +83,10 @@ const RiskMetrics = ({ data }) => {
                 trend: data.portfolio_expected_return > 0 ? 'up' : 'down', primary: true
             },
             {
-                label: 'Monte Carlo VaR',
-                value: (Math.abs(data.monte_carlo_var_95) * 100).toFixed(2),
+                label: 'MC VaR (30D)',
+                value: (Math.abs(data.monte_carlo_var95_30d ?? data.monte_carlo_var_95) * 100).toFixed(2),
                 format: 'percentage',
-                sub: '95% Confidence',
+                sub: '30-Day · 95% CI',
                 icon: <ShieldAlert size={16} />,
                 color: 'text-rose-400', bg: 'bg-rose-500/10', gradient: 'from-rose-500 to-red-500',
                 trend: 'down', primary: true
