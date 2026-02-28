@@ -2,21 +2,29 @@ import React from 'react';
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { ActivitySquare } from 'lucide-react';
 
-const MonteCarloChart = () => {
-    // Generate dummy geometric brownian motion paths for visualization
-    const data = Array.from({ length: 30 }).map((_, i) => {
-        const expected = 100 * Math.exp(0.1 * (i / 252));
-        const var95 = 100 * Math.exp(0.1 * (i / 252) - 1.65 * 0.2 * Math.sqrt(i / 252));
-        const upper95 = 100 * Math.exp(0.1 * (i / 252) + 1.65 * 0.2 * Math.sqrt(i / 252));
+const MonteCarloChart = ({ data: analysisData }) => {
+    // Dynamically generate paths based on actual portfolio metrics if available
+    const mu = analysisData ? analysisData.portfolio_expected_return : 0.05 / 252;
+    const sigma = analysisData ? analysisData.portfolio_volatility : 0.2 / Math.sqrt(252);
+
+    const data = Array.from({ length: 31 }).map((_, i) => {
+        const t = i;
+        const drift = (mu - 0.5 * sigma * sigma) * t;
+        const diffusion = sigma * Math.sqrt(t);
+
+        const expected = 100 * Math.exp(mu * t);
+        const lower95 = 100 * Math.exp(drift - 1.645 * diffusion);
+        const upper95 = 100 * Math.exp(drift + 1.645 * diffusion);
 
         return {
             day: i,
-            path1: 100 * Math.exp(((0.1 - 0.5 * 0.2 * 0.2) * (i / 252)) + (0.2 * Math.sqrt(i / 252) * (Math.random() * 2 - 1))),
-            path2: 100 * Math.exp(((0.1 - 0.5 * 0.2 * 0.2) * (i / 252)) + (0.2 * Math.sqrt(i / 252) * (Math.random() * 2 - 1.2))), // slightly bearish
-            path3: 100 * Math.exp(((0.1 - 0.5 * 0.2 * 0.2) * (i / 252)) + (0.2 * Math.sqrt(i / 252) * (Math.random() * 2 - 0.8))), // slightly bullish
+            // Random paths centered around the drift
+            path1: 100 * Math.exp(drift + diffusion * (Math.random() * 2.2 - 1.1)),
+            path2: 100 * Math.exp(drift + diffusion * (Math.random() * 2.5 - 1.8)), // stress
+            path3: 100 * Math.exp(drift + diffusion * (Math.random() * 2.5 - 0.7)), // bull
             median: expected,
-            var95: var95,
-            confidenceBand: [var95, upper95]
+            var95: lower95,
+            confidenceBand: [lower95, upper95]
         };
     });
 

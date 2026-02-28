@@ -9,6 +9,11 @@ import RiskGauge from '../components/RiskGauge';
 
 const Dashboard = () => {
     const containerRef = useRef(null);
+    const [analysisData, setAnalysisData] = React.useState(null);
+
+    const handleUploadSuccess = (data) => {
+        setAnalysisData(data);
+    };
 
     useEffect(() => {
         // Initial entrance animation
@@ -60,14 +65,14 @@ const Dashboard = () => {
 
                 {/* Left Column: Context & Scenarios */}
                 <div className="lg:col-span-3 flex flex-col gap-8">
-                    <div className="gsap-entry h-48">
-                        <UploadPortfolio />
+                    <div className="gsap-entry">
+                        <UploadPortfolio onUploadSuccess={handleUploadSuccess} />
                     </div>
                     <div className="gsap-entry h-[22rem]">
-                        <RiskGauge />
+                        <RiskGauge value={analysisData?.monte_carlo_var_95} />
                     </div>
                     <div className="gsap-entry flex-grow lg:min-h-[24rem]">
-                        <ScenarioPanel />
+                        <ScenarioPanel data={analysisData} />
                     </div>
                 </div>
 
@@ -75,16 +80,16 @@ const Dashboard = () => {
                 <div className="lg:col-span-9 flex flex-col gap-8">
                     {/* Top: Risk Metrics */}
                     <div className="gsap-entry">
-                        <RiskMetrics />
+                        <RiskMetrics data={analysisData} />
                     </div>
 
                     {/* Middle/Bottom: Charts Grid */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 flex-grow">
                         <div className="gsap-entry">
-                            <MonteCarloChart />
+                            <MonteCarloChart data={analysisData} />
                         </div>
                         <div className="gsap-entry">
-                            <CorrelationHeatmap />
+                            <CorrelationHeatmap matrix={analysisData?.correlation_matrix} assets={analysisData?.asset_names} />
                         </div>
                     </div>
                 </div>

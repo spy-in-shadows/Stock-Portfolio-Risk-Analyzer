@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
 import { Network } from 'lucide-react';
 
-const CorrelationHeatmap = () => {
-    // Updated assets including NIFTY 50, BANK NIFTY, and GOLD
-    const assets = ['NIFTY 50', 'BANK NIFTY', 'GOLD', 'RELIANCE', 'INFY'];
-
-    // Nifty 50 and Bank Nifty highly positive (e.g. 0.88), Nifty/Bank Nifty and Gold inverse (-0.45 / -0.38)
-    const matrix = [
+const CorrelationHeatmap = ({ matrix, assets }) => {
+    // Fallback if no data uploaded
+    const displayAssets = assets || ['NIFTY 50', 'BANK NIFTY', 'GOLD', 'RELIANCE', 'INFY'];
+    const displayMatrix = matrix || [
         [1.00, 0.88, -0.45, 0.75, 0.60],
         [0.88, 1.00, -0.38, 0.65, 0.45],
         [-0.45, -0.38, 1.00, -0.20, -0.15],
@@ -51,7 +49,7 @@ const CorrelationHeatmap = () => {
                     <thead>
                         <tr>
                             <th className="p-2 text-slate-500 font-normal"></th>
-                            {assets.map(a => (
+                            {displayAssets.map(a => (
                                 <th key={a} className="p-2 text-slate-400 font-medium truncate" title={a}>
                                     {a.substring(0, 5)}
                                 </th>
@@ -59,10 +57,10 @@ const CorrelationHeatmap = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {matrix.map((row, i) => (
+                        {displayMatrix.map((row, i) => (
                             <tr key={i}>
-                                <td className="p-2 text-slate-400 font-medium text-left truncate" title={assets[i]}>
-                                    {assets[i].substring(0, 10)}
+                                <td className="p-2 text-slate-400 font-medium text-left truncate" title={displayAssets[i]}>
+                                    {displayAssets[i].substring(0, 10)}
                                 </td>
                                 {row.map((val, j) => (
                                     <td key={`${i}-${j}`} className="p-1 relative">
@@ -90,7 +88,7 @@ const CorrelationHeatmap = () => {
                     style={{ bottom: '10px', right: '10px' }}>
                     <p className="text-[10px] text-slate-400 mb-1 tracking-wider uppercase">Linear Dependency</p>
                     <p className="text-sm font-bold text-slate-200">
-                        {assets[hoveredCell.i]} <span className="text-slate-500 font-normal mx-1">vs</span> {assets[hoveredCell.j]}
+                        {displayAssets[hoveredCell.i]} <span className="text-slate-500 font-normal mx-1">vs</span> {displayAssets[hoveredCell.j]}
                     </p>
                     <p className={`text-xs mt-1 font-mono ${hoveredCell.val > 0.5 ? 'text-[#00C040]' : hoveredCell.val < -0.3 ? 'text-[#FF0000]' : 'text-slate-400'}`}>
                         Correlation: {hoveredCell.val.toFixed(2)}

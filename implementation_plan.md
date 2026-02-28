@@ -2,42 +2,33 @@
 
 ## 1. Roadmap & Implementation Checklist
 
-### Phase 1: Stateless Risk Engine Implementation (`risk_engine.py`)
-- [ ] **Step 1: Data Preprocessing Utility**
-  - Implement CSV parsing with date sorting and NaN handling.
-  - Create logic to isolate Assets from Benchmark.
-- [ ] **Step 2: core Statistical Functions**
-  - Portfolio Volatility (Matrix-based).
-  - Expected Return vector.
-  - Sharpe Ratio (Risk-free rate integration).
-- [ ] **Step 3: Value at Risk (VaR) Suite**
-  - Historical VaR (95th percentile).
-  - Parametric VaR (Variance-Covariance).
-- [ ] **Step 4: Monte Carlo Simulation Module**
-  - Cholesky decomposition for correlation preservation.
-  - 10,000+ simulations using multivariate normal sampling.
-  - Monte Carlo VaR computation.
-- [ ] **Step 5: Systematic Risk Engine**
-  - Beta calculation relative to standardized benchmark.
-  - Correlation Matrix generation.
+### Phase 1: Stateless Risk Engine Implementation (`risk_engine.py`) [COMPLETED]
+- [x] **Step 1: Data Preprocessing Utility**
+- [x] **Step 2: core Statistical Functions**
+- [x] **Step 3: Value at Risk (VaR) Suite**
+- [x] **Step 4: Monte Carlo Simulation Module**
+- [x] **Step 5: Systematic Risk Engine**
 
-### Phase 2: FastAPI Backend Development (`main.py`)
-- [ ] **Endpoint: `GET /`**
-  - Health check and environment verification.
-- [ ] **Endpoint: `POST /analyze`**
-  - Support file upload via Multipart.
-  - Handle optional parameters: Weights, Risk-free Rate, Confidence level.
-- [ ] **Validation Layer**
-  - Weights validation (Sum = 1, Length match).
-  - CSV Format/Minimum row validation.
-  - Error response standard (HTTP 400).
-- [ ] **JSON Response Formatting**
-  - Consolidate all metrics into the specified JSON structure.
+### Phase 2: FastAPI Backend Development (`main.py`) [COMPLETED]
+- [x] **Endpoint: `GET /`**
+- [x] **Endpoint: `POST /analyze`**
+- [x] **Validation Layer**
+- [x] **JSON Response Formatting**
 
 ### Phase 3: Infrastructure & Deployment
-- [ ] **Dependencies**: Finalize `requirements.txt`.
-- [ ] **Production Config**: Configure `uvicorn` for host-binding.
-- [ ] **Deployment**: Integration with Render/Vercel.
+- [ ] **Dependencies**: Finalize `requirements.txt`. [DONE]
+- [ ] **Runtime Configuration**: Configure `.env` for API base URL.
+- [ ] **Deploy Backend**: Setup on Render.
+- [ ] **Deploy Frontend**: Setup on Vercel.
+
+### Phase 4: Frontend-Backend Integration [COMPLETED]
+- [x] **API Service Layer**: Implement axios/fetch calls to the backend.
+- [x] **File Upload Hook**: Connect `UploadPortfolio` to the `/analyze` endpoint.
+- [x] **Dynamic Visualization**:
+  - Feed Recharts with Monte Carlo simulation paths.
+  - Populate Heatmap with Correlation Matrix.
+  - Dynamic Gauge for VaR results.
+- [x] **Error Handling**: Display backend validation errors on UI toast/banners.
 
 ## 2. Technical Stack
 - **Framework**: FastAPI
