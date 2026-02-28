@@ -2,23 +2,34 @@ import React from 'react';
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { ActivitySquare } from 'lucide-react';
 
-const MonteCarloChart = () => {
-    // Generate dummy geometric brownian motion paths for visualization
-    const data = Array.from({ length: 30 }).map((_, i) => {
-        const expected = 100 * Math.exp(0.1 * (i / 252));
-        const var95 = 100 * Math.exp(0.1 * (i / 252) - 1.65 * 0.2 * Math.sqrt(i / 252));
-        const upper95 = 100 * Math.exp(0.1 * (i / 252) + 1.65 * 0.2 * Math.sqrt(i / 252));
+const MonteCarloChart = ({ data: analysisData }) => {
+    const isLiveData = !!(analysisData?.mc_chart_data?.length);
 
-        return {
-            day: i,
-            path1: 100 * Math.exp(((0.1 - 0.5 * 0.2 * 0.2) * (i / 252)) + (0.2 * Math.sqrt(i / 252) * (Math.random() * 2 - 1))),
-            path2: 100 * Math.exp(((0.1 - 0.5 * 0.2 * 0.2) * (i / 252)) + (0.2 * Math.sqrt(i / 252) * (Math.random() * 2 - 1.2))), // slightly bearish
-            path3: 100 * Math.exp(((0.1 - 0.5 * 0.2 * 0.2) * (i / 252)) + (0.2 * Math.sqrt(i / 252) * (Math.random() * 2 - 0.8))), // slightly bullish
-            median: expected,
-            var95: var95,
-            confidenceBand: [var95, upper95]
-        };
-    });
+    // Use real backend simulation data if available
+    const data = isLiveData
+        ? analysisData.mc_chart_data
+        : (() => {
+            // Fallback approximation using portfolio stats
+            const mu = analysisData?.portfolio_expected_return ?? 0.05 / 252;
+            const sigma = analysisData?.portfolio_volatility ?? 0.2 / Math.sqrt(252);
+
+            return Array.from({ length: 32 }).map((_, i) => {
+                const drift = (mu - 0.5 * sigma * sigma) * i;
+                const diffusion = sigma * Math.sqrt(i);
+                return {
+                    day: i,
+                    path1: 100 * Math.exp(drift + diffusion * (Math.random() * 2.2 - 1.1)),
+                    path2: 100 * Math.exp(drift + diffusion * (Math.random() * 2.5 - 1.8)),
+                    path3: 100 * Math.exp(drift + diffusion * (Math.random() * 2.5 - 0.7)),
+                    median: 100 * Math.exp(mu * i),
+                    var95: 100 * Math.exp(drift - 1.645 * diffusion),
+                    confidenceBand: [
+                        100 * Math.exp(drift - 1.645 * diffusion),
+                        100 * Math.exp(drift + 1.645 * diffusion)
+                    ]
+                };
+            });
+        })();
 
     const CustomTooltip = ({ active, payload, label }) => {
         if (active && payload && payload.length) {
@@ -27,12 +38,13 @@ const MonteCarloChart = () => {
                     <p className="text-slate-400 mb-2 font-semibold uppercase tracking-wider border-b border-slate-700 pb-1">Day T+{label}</p>
                     <div className="space-y-1">
                         {payload.map((p, idx) => {
-                            if (p.name === 'confidenceBand') return null; // Don't show band in list
+                            // Skip the confidence band — its value is an array [lower, upper], not a scalar
+                            if (Array.isArray(p.value) || p.value === undefined || p.value === null) return null;
                             return (
                                 <div key={idx} className="flex justify-between items-center gap-4 font-mono">
                                     <span style={{ color: p.color || p.stroke }}>{p.name}:</span>
                                     <span className="text-slate-200">
-                                        ₹{(p.value * 245000).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                        {(p.value * 100).toFixed(2)}%
                                     </span>
                                 </div>
                             );
@@ -51,7 +63,9 @@ const MonteCarloChart = () => {
                     <ActivitySquare size={16} className="text-emerald-400" />
                     Monte Carlo Simulation
                 </h2>
-                <div className="text-xs text-slate-500 font-mono bg-slate-800/50 px-2 py-1 rounded">10,000 PATHS • 30 DAYS</div>
+                <div className={`text-xs font-mono px-2 py-1 rounded ${isLiveData ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/50' : 'bg-slate-800/50 text-slate-500'}`}>
+                    {isLiveData ? '● 5,000 REAL PATHS • 31 DAYS' : 'SAMPLE DATA • 31 DAYS'}
+                </div>
             </div>
 
             <div className="flex-grow w-full">

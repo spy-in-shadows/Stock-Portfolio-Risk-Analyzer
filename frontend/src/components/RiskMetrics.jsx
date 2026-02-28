@@ -45,7 +45,7 @@ const generateSparkline = (trend) => {
     }));
 };
 
-const RiskMetrics = () => {
+const RiskMetrics = ({ data }) => {
     const cardsRef = useRef([]);
 
     useEffect(() => {
@@ -61,13 +61,65 @@ const RiskMetrics = () => {
         });
     }, []);
 
-    const metrics = useMemo(() => [
-        { label: 'Total Exposure', value: '₹24.5M', format: 'currencyM', sub: 'Gross notional', icon: <Target size={16} />, color: 'text-indigo-400', bg: 'bg-indigo-500/10', gradient: 'from-indigo-500 to-blue-500', trend: 'up', primary: true },
-        { label: '95% Daily VaR', value: '₹420K', format: 'currencyK', sub: '1.71% of port', icon: <ShieldAlert size={16} />, color: 'text-rose-400', bg: 'bg-rose-500/10', gradient: 'from-rose-500 to-red-500', trend: 'down', primary: true },
-        { label: 'Portfolio Vol (Ann)', value: '18.4%', format: 'percentage', sub: 'Benchmark: 14.2%', icon: <Activity size={16} />, color: 'text-amber-400', bg: 'bg-amber-500/10', gradient: 'from-amber-500 to-orange-500', trend: 'flat', primary: false },
-        { label: 'Sharpe Ratio', value: '1.82', format: 'number', sub: 'Risk-free: 6.0%', icon: <TrendingDown size={16} />, color: 'text-emerald-400', bg: 'bg-emerald-500/10', gradient: 'from-emerald-500 to-teal-500', trend: 'up', primary: false },
-        { label: 'Beta (vs NIFTY)', value: '1.14', format: 'number', sub: 'Market proxy', icon: <Zap size={16} />, color: 'text-cyan-400', bg: 'bg-cyan-500/10', gradient: 'from-cyan-500 to-blue-500', trend: 'flat', primary: false },
-    ], []);
+    const metrics = useMemo(() => {
+        if (!data) {
+            return [
+                { label: 'Expt Return', value: '0.0', format: 'number', sub: 'Historical mean', icon: <Target size={16} />, color: 'text-indigo-400', bg: 'bg-indigo-500/10', gradient: 'from-indigo-500 to-blue-500', trend: 'flat', primary: true },
+                { label: 'Monte Carlo VaR', value: '0.0', format: 'percentage', sub: '95% Confidence', icon: <ShieldAlert size={16} />, color: 'text-rose-400', bg: 'bg-rose-500/10', gradient: 'from-rose-500 to-red-500', trend: 'flat', primary: true },
+                { label: 'Portfolio Vol', value: '0.0', format: 'percentage', sub: 'Daily std dev', icon: <Activity size={16} />, color: 'text-amber-400', bg: 'bg-amber-500/10', gradient: 'from-amber-500 to-orange-500', trend: 'flat', primary: false },
+                { label: 'Sharpe Ratio', value: '0.0', format: 'number', sub: 'Risk-adjusted', icon: <TrendingDown size={16} />, color: 'text-emerald-400', bg: 'bg-emerald-500/10', gradient: 'from-emerald-500 to-teal-500', trend: 'flat', primary: false },
+                { label: 'Portfolio Beta', value: '0.0', format: 'number', sub: 'vs Benchmark', icon: <Zap size={16} />, color: 'text-cyan-400', bg: 'bg-cyan-500/10', gradient: 'from-cyan-500 to-blue-500', trend: 'flat', primary: false },
+            ];
+        }
+
+        return [
+            {
+                label: 'Expt Return',
+                value: (data.portfolio_expected_return * 100).toFixed(2),
+                format: 'percentage',
+                sub: 'Historical Mean',
+                icon: <Target size={16} />,
+                color: 'text-indigo-400', bg: 'bg-indigo-500/10', gradient: 'from-indigo-500 to-blue-500',
+                trend: data.portfolio_expected_return > 0 ? 'up' : 'down', primary: true
+            },
+            {
+                label: 'Monte Carlo VaR',
+                value: (Math.abs(data.monte_carlo_var_95) * 100).toFixed(2),
+                format: 'percentage',
+                sub: '95% Confidence',
+                icon: <ShieldAlert size={16} />,
+                color: 'text-rose-400', bg: 'bg-rose-500/10', gradient: 'from-rose-500 to-red-500',
+                trend: 'down', primary: true
+            },
+            {
+                label: 'Portfolio Vol',
+                value: (data.portfolio_volatility * 100).toFixed(2),
+                format: 'percentage',
+                sub: 'Daily Std Dev',
+                icon: <Activity size={16} />,
+                color: 'text-amber-400', bg: 'bg-amber-500/10', gradient: 'from-amber-500 to-orange-500',
+                trend: 'flat', primary: false
+            },
+            {
+                label: 'Sharpe Ratio',
+                value: data.sharpe_ratio.toFixed(2),
+                format: 'number',
+                sub: `RF: 0.0%`,
+                icon: <TrendingDown size={16} />,
+                color: 'text-emerald-400', bg: 'bg-emerald-500/10', gradient: 'from-emerald-500 to-teal-500',
+                trend: data.sharpe_ratio > 1 ? 'up' : 'flat', primary: false
+            },
+            {
+                label: 'Portfolio Beta',
+                value: data.beta.toFixed(2),
+                format: 'number',
+                sub: 'vs Benchmark',
+                icon: <Zap size={16} />,
+                color: 'text-cyan-400', bg: 'bg-cyan-500/10', gradient: 'from-cyan-500 to-blue-500',
+                trend: data.beta > 1 ? 'up' : 'down', primary: false
+            },
+        ];
+    }, [data]);
 
     return (
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">

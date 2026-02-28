@@ -3,22 +3,29 @@ import { RadialBarChart, RadialBar, ResponsiveContainer, PolarAngleAxis } from '
 import { ShieldCheck } from 'lucide-react';
 import gsap from 'gsap';
 
-const RiskGauge = () => {
+const RiskGauge = ({ value }) => {
     const [score, setScore] = useState(0);
-    const targetScore = 78; // 0-100 where higher is safer/better risk profile
+
+    // Convert VaR (e.g. 0.045) into a 0-100 score
+    // 0.01 (1%) -> 90 score
+    // 0.05 (5%) -> 50 score
+    // 0.10 (10%) -> 0 score
+    const targetScore = value
+        ? Math.max(0, Math.min(100, Math.round(100 - (Math.abs(value) * 1000))))
+        : 78; // Default fallback
 
     useEffect(() => {
-        // Animate gauge fill on mount
-        const obj = { val: 0 };
+        // Animate gauge fill on mount and data changes
+        const obj = { val: score };
         gsap.to(obj, {
             val: targetScore,
-            duration: 2,
-            ease: "power3.out",
+            duration: 1.5,
+            ease: "power2.out",
             onUpdate: () => {
                 setScore(Math.round(obj.val));
             }
         });
-    }, []);
+    }, [targetScore]);
 
     const data = [
         { name: 'RiskScore', value: score, fill: score > 70 ? '#10b981' : score > 40 ? '#f59e0b' : '#ef4444' }
