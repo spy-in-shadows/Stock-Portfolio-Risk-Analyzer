@@ -111,22 +111,26 @@ const UploadPortfolio = ({ onUploadSuccess }) => {
             <div className="mt-4 bg-slate-900/60 border border-slate-800/50 rounded-lg p-3 relative z-10">
                 <div className="flex items-center gap-2 mb-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]"></div>
-                    <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Global Data Standard</p>
+                    <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Broker Export Standard</p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-1.5">
-                    <div className="flex flex-col gap-1 p-2 bg-slate-800/40 rounded border border-slate-700/30 text-center">
-                        <span className="text-[8px] text-slate-500 font-mono uppercase tracking-tighter">Col 1</span>
-                        <span className="text-[10px] text-cyan-400 font-bold font-mono">DATE</span>
+                <div className="grid grid-cols-3 gap-1.5">
+                    <div className="flex flex-col gap-1 p-2 bg-slate-800/40 rounded border border-cyan-800/30 text-center">
+                        <span className="text-[8px] text-slate-500 font-mono uppercase tracking-tighter">Required</span>
+                        <span className="text-[10px] text-cyan-400 font-bold font-mono">TICKER</span>
+                    </div>
+                    <div className="flex flex-col gap-1 p-2 bg-slate-800/40 rounded border border-indigo-800/30 text-center">
+                        <span className="text-[8px] text-slate-500 font-mono uppercase tracking-tighter">Required</span>
+                        <span className="text-[10px] text-indigo-400 font-bold font-mono">WEIGHT %</span>
                     </div>
                     <div className="flex flex-col gap-1 p-2 bg-slate-800/40 rounded border border-slate-700/30 text-center">
-                        <span className="text-[8px] text-slate-500 font-mono uppercase tracking-tighter">Cols 2...N</span>
-                        <span className="text-[10px] text-indigo-400 font-bold font-mono">ASSET PRICES</span>
+                        <span className="text-[8px] text-slate-500 font-mono uppercase tracking-tighter">Optional</span>
+                        <span className="text-[10px] text-slate-400 font-bold font-mono">ANY...</span>
                     </div>
                 </div>
 
                 <p className="text-[9px] text-slate-500 mt-2 font-medium italic border-t border-slate-800/50 pt-2 text-center uppercase tracking-tighter">
-                    Note: CSV should contain only asset prices. Benchmark is fetched via ticker.
+                    Prices fetched automatically · No price history needed
                 </p>
             </div>
         </div>

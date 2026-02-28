@@ -3,70 +3,223 @@ import pandas as pd
 from scipy.stats import norm
 import yfinance as yf
 import time
+from datetime import datetime, timedelta
 from fastapi import HTTPException
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
+
+# ═══════════════════════════════════════════════════════════════════
+# MODULE 1: Holdings CSV Parser
+# Extracts tickers and weights from a broker-style export CSV.
+# ═══════════════════════════════════════════════════════════════════
+
+def parse_holdings_csv(df: pd.DataFrame) -> Tuple[List[str], List[float]]:
+    """
+    Parses a broker-style holdings CSV.
+    Required columns: 'Ticker', 'Portfolio Weight %'
+    Returns: (tickers: List[str], weights: List[float]) — weights are decimals summing to 1.0
+    """
+    # Normalize column names — strip surrounding whitespace
+    df.columns = [str(c).strip() for c in df.columns]
+
+    required_cols = ['Ticker', 'Portfolio Weight %']
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Missing required columns: {missing}. "
+                f"Your CSV has: {list(df.columns)}. "
+                "Ensure 'Ticker' and 'Portfolio Weight %' columns are present."
+            )
+        )
+
+    # Work only with the two critical columns
+    holdings = df[['Ticker', 'Portfolio Weight %']].copy()
+
+    # Sanitize tickers
+    holdings['Ticker'] = holdings['Ticker'].astype(str).str.strip().str.upper()
+    holdings = holdings[holdings['Ticker'].notna() & (holdings['Ticker'] != '') & (holdings['Ticker'] != 'NAN')]
+
+    # Coerce weights to numeric and drop unparseable rows
+    holdings['weight'] = pd.to_numeric(holdings['Portfolio Weight %'], errors='coerce')
+    holdings = holdings.dropna(subset=['weight'])
+
+    # Drop zero or negative weight positions
+    holdings = holdings[holdings['weight'] > 0]
+
+    if holdings.empty:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid holdings found. Ensure 'Portfolio Weight %' has positive numeric values."
+        )
+
+    # Aggregate duplicate tickers by summing weights
+    holdings = holdings.groupby('Ticker', as_index=False)['weight'].sum()
+
+    if len(holdings) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"At least 2 assets required. Got {len(holdings)} unique ticker(s) after parsing."
+        )
+
+    # Normalize to decimal weights summing to exactly 1.0
+    holdings['weight_decimal'] = holdings['weight'] / holdings['weight'].sum()
+
+    tickers = holdings['Ticker'].tolist()
+    weights = holdings['weight_decimal'].round(8).tolist()
+
+    return tickers, weights
+
+
+# ═══════════════════════════════════════════════════════════════════
+# MODULE 2: Multi-Ticker Historical Price Fetcher
+# Fetches adjusted close prices for a list of tickers via yfinance.
+# ═══════════════════════════════════════════════════════════════════
+
+def fetch_price_history(
+    tickers: List[str],
+    start_date: str,
+    end_date: str
+) -> pd.DataFrame:
+    """
+    Fetches historical adjusted close prices for all tickers.
+    Returns a clean DataFrame: DatetimeIndex × Tickers (columns).
+    Requires at least 60 valid trading days after alignment.
+    """
+    max_retries = 3
+    df = None
+
+    for attempt in range(max_retries):
+        df = yf.download(
+            tickers,
+            start=start_date,
+            end=end_date,
+            progress=False,
+            auto_adjust=True     # 'Close' column already adjusted post-0.2.x
+        )
+        if df is not None and not df.empty:
+            break
+        wait = 2 ** attempt   # 1s → 2s → 4s
+        time.sleep(wait)
+
+    if df is None or df.empty:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Failed to fetch historical data for: {tickers}. "
+                "Yahoo Finance may be rate-limiting. Wait a moment and retry."
+            )
+        )
+
+    # ── Column extraction (handles MultiIndex from yfinance 0.2.x) ──
+    if isinstance(df.columns, pd.MultiIndex):
+        level0 = df.columns.get_level_values(0)
+        if 'Close' in level0:
+            price_df = df['Close']
+        elif 'Adj Close' in level0:
+            price_df = df['Adj Close']
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not find price column. Found: {list(level0.unique())}"
+            )
+    else:
+        # Single ticker — flat columns
+        if 'Close' in df.columns:
+            price_df = df[['Close']]
+        elif 'Adj Close' in df.columns:
+            price_df = df[['Adj Close']]
+        else:
+            raise HTTPException(status_code=400, detail="No price column found in downloaded data.")
+
+    # Normalize column names to match uploaded tickers
+    if isinstance(price_df, pd.Series):
+        price_df = price_df.to_frame(name=tickers[0])
+    price_df.columns = [str(c).strip().upper() for c in price_df.columns]
+
+    # Reorder to match original tickers list order
+    available = [t for t in tickers if t in price_df.columns]
+    missing_tickers = [t for t in tickers if t not in price_df.columns]
+    if missing_tickers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No data returned for tickers: {missing_tickers}. Check if they exist on Yahoo Finance."
+        )
+    price_df = price_df[available]
+
+    # Forward-fill small gaps (1-2 day market closures) then drop any remaining NaNs
+    price_df = price_df.ffill().dropna()
+
+    if len(price_df) < 60:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Insufficient historical data: {len(price_df)} valid trading days. "
+                "Minimum 60 required. Try fetching a wider date range."
+            )
+        )
+
+    return price_df
+
+
+# ═══════════════════════════════════════════════════════════════════
+# MODULE 3: Benchmark Returns Fetcher
+# Single ticker benchmark via yfinance, with retry & column guards.
+# ═══════════════════════════════════════════════════════════════════
 
 def fetch_benchmark_returns(ticker: str, start_date: str, end_date: str) -> pd.Series:
     """
-    Fetches historical prices for a given ticker and returns daily percentage returns.
-    Handles yfinance 0.2.x API (auto_adjust=True, MultiIndex columns).
+    Fetches adjusted close prices for a benchmark ticker.
+    Returns daily percentage returns as a named pd.Series.
     """
     try:
-        # Add a small buffer before start_date so returns on the first day are calculatable
-        start_buffer = (pd.to_datetime(start_date) - pd.Timedelta(days=5)).strftime('%Y-%m-%d')
-
-        # Retry with exponential backoff — yfinance rate limits quickly under load
         max_retries = 3
         df = None
+
         for attempt in range(max_retries):
             df = yf.download(
                 ticker,
-                start=start_buffer,
+                start=start_date,
                 end=end_date,
                 progress=False,
                 auto_adjust=True
             )
             if df is not None and not df.empty:
                 break
-            # Rate limited or transient failure — wait before retrying
-            wait = 2 ** attempt  # 1s, 2s, 4s
+            wait = 2 ** attempt
             time.sleep(wait)
 
         if df is None or df.empty:
-            raise ValueError(f"No price data returned for ticker: '{ticker}'. "
-                             "This may be due to Yahoo Finance rate limiting. "
-                             "Please wait a few seconds and try again.")
+            raise ValueError(
+                f"No data returned for benchmark '{ticker}'. "
+                "Yahoo Finance may be rate-limiting. Wait and retry."
+            )
 
-        # --- Robust column extraction (handles MultiIndex from yfinance 0.2.x) ---
+        # Robust column extraction
         if isinstance(df.columns, pd.MultiIndex):
-            # Flatten: prefer 'Close', fallback to 'Adj Close'
             level0 = df.columns.get_level_values(0)
             if 'Close' in level0:
                 price_series = df['Close'].iloc[:, 0]
             elif 'Adj Close' in level0:
                 price_series = df['Adj Close'].iloc[:, 0]
             else:
-                raise ValueError(f"Could not find a price column for '{ticker}'. "
-                                 f"Available columns: {list(level0.unique())}")
+                raise ValueError(f"No price column found. Available: {list(level0.unique())}")
         else:
-            # Flat columns
             if 'Close' in df.columns:
                 price_series = df['Close']
             elif 'Adj Close' in df.columns:
                 price_series = df['Adj Close']
             else:
-                raise ValueError(f"Could not find a price column for '{ticker}'. "
-                                 f"Available columns: {list(df.columns)}")
+                raise ValueError(f"No price column found. Available: {list(df.columns)}")
 
-        # Guarantee it is a 1-D Series
         if isinstance(price_series, pd.DataFrame):
             price_series = price_series.iloc[:, 0]
 
         price_series = price_series.dropna()
 
         if price_series.empty:
-            raise ValueError(f"Price series for '{ticker}' is empty after dropping NaNs.")
+            raise ValueError(f"Benchmark '{ticker}' price series is empty after cleaning.")
 
         returns = price_series.pct_change().dropna()
         returns.name = "Benchmark_Returns"
@@ -77,165 +230,158 @@ def fetch_benchmark_returns(ticker: str, start_date: str, end_date: str) -> pd.S
     except Exception as e:
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to fetch benchmark data for '{ticker}': {str(e)}"
+            detail=f"Benchmark fetch failed for '{ticker}': {str(e)}"
         )
 
 
-def preprocess_portfolio_data(df: pd.DataFrame, benchmark_ticker: str):
-    """
-    Standardizes CSV data (assets only) and fetches benchmark returns.
-    Aligns both series by date.
-    """
-    # 1. Identify and parse the Date column (always the first column)
-    date_col_name = df.columns[0]
-    
-    # Convert to datetime, coerce errors to NaT
-    df[date_col_name] = pd.to_datetime(df[date_col_name], errors='coerce')
-    
-    # Drop any rows where the date couldn't be parsed
-    df = df.dropna(subset=[date_col_name])
-    
-    # Sort by date ascending
-    df = df.sort_values(by=date_col_name)
-    
-    # Set date as index and remove from columns
-    df = df.set_index(date_col_name)
-    
-    # Convert all asset columns to numeric, drop non-numeric
-    df = df.apply(pd.to_numeric, errors='coerce')
-    
-    # Forward fill small gaps, then drop remaining NaNs
-    df = df.ffill().dropna()
-    
-    if df.empty:
-        raise HTTPException(status_code=400, detail="CSV is empty after cleaning. Check your date and price columns.")
+# ═══════════════════════════════════════════════════════════════════
+# MODULE 4: Broker CSV → Risk-Ready Data Pipeline
+# Orchestrates parse → fetch → align
+# ═══════════════════════════════════════════════════════════════════
 
-    # 2. Extract scalar start/end dates
-    # Use Python's built-in string conversion to guarantee scalar str output
-    start_date = str(df.index.min().date())
-    end_date   = str((df.index.max() + pd.Timedelta(days=1)).date())
-    
-    # Capture asset names before any transformation
-    asset_names = df.columns.tolist()
-    
-    # 3. Calculate Asset Returns
-    asset_returns = df.pct_change().dropna()
-    
-    # 4. Fetch Benchmark Returns from yfinance
-    bench_returns = fetch_benchmark_returns(benchmark_ticker, start_date, end_date)
-    
-    # 5. Date Alignment — inner join on common trading days
-    combined = pd.concat([asset_returns, bench_returns], axis=1).dropna()
-    
-    if len(combined) < 30:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Sample size too small after date alignment ({len(combined)} overlapping days). Minimum 30 required."
-        )
-    
-    # Separate back into assets and benchmark
-    final_asset_returns = combined.drop(columns=["Benchmark_Returns"])
-    final_bench_returns = combined["Benchmark_Returns"]
-    
-    return final_asset_returns, final_bench_returns, asset_names
-
-
-def get_risk_metrics(
-    asset_returns: pd.DataFrame, 
-    bench_returns: pd.Series, 
+def preprocess_broker_data(
+    df: pd.DataFrame,
     benchmark_ticker: str,
-    asset_names: List[str], 
-    weights: Optional[List[float]] = None, 
-    risk_free_rate: float = 0.0, 
-    confidence_level: float = 0.95, 
-    simulations: int = 10000
+    history_days: int = 365
 ):
     """
-    Computation engine for portfolio risk analytics using standardized Beta formula.
+    Full pipeline: parse broker CSV → fetch prices → fetch benchmark → align.
+    Returns: (asset_returns, bench_returns, weights, asset_names)
     """
-    num_assets = asset_returns.shape[1]
-    
-    # 1. Weights Handling
-    if weights is None:
-        weights = np.array([1.0 / num_assets] * num_assets)
-    else:
-        weights = np.array(weights)
-        # Ensure weights sum to 1.0
-        if not np.isclose(np.sum(weights), 1.0):
-            weights = weights / np.sum(weights)
+    # Step 1: Parse holdings from the broker CSV
+    tickers, weights = parse_holdings_csv(df)
 
-    # 2. Statistical Components
+    # Step 2: Define date range for historical data fetch
+    end_date   = datetime.today().strftime('%Y-%m-%d')
+    start_date = (datetime.today() - timedelta(days=history_days)).strftime('%Y-%m-%d')
+
+    # Step 3: Fetch historical portfolio asset prices
+    price_df = fetch_price_history(tickers, start_date, end_date)
+
+    # Step 4: Fetch benchmark returns across the same date range
+    bench_returns = fetch_benchmark_returns(benchmark_ticker, start_date, end_date)
+
+    # Step 5: Compute asset returns
+    asset_returns = price_df.pct_change().dropna()
+
+    # Step 6: Align asset returns with benchmark returns (inner join on common dates)
+    combined = pd.concat([asset_returns, bench_returns], axis=1).dropna()
+
+    if len(combined) < 60:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Only {len(combined)} overlapping trading days between portfolio and benchmark. "
+                "Minimum 60 required."
+            )
+        )
+
+    final_asset_returns = combined.drop(columns=["Benchmark_Returns"])
+    final_bench_returns = combined["Benchmark_Returns"]
+
+    # Reorder weights to match final asset columns (after any column drops in alignment)
+    final_tickers  = final_asset_returns.columns.tolist()
+    ticker_to_weight = dict(zip(tickers, weights))
+    final_weights = [ticker_to_weight[t] for t in final_tickers]
+
+    # Re-normalize in case any tickers were dropped  
+    total = sum(final_weights)
+    final_weights = [w / total for w in final_weights]
+
+    return final_asset_returns, final_bench_returns, final_weights, final_tickers
+
+
+# ═══════════════════════════════════════════════════════════════════
+# MODULE 5: Core Risk Computation Engine (Unchanged)
+# All formula-level math lives here.
+# ═══════════════════════════════════════════════════════════════════
+
+def get_risk_metrics(
+    asset_returns: pd.DataFrame,
+    bench_returns: pd.Series,
+    benchmark_ticker: str,
+    asset_names: List[str],
+    weights: List[float],
+    risk_free_rate: float = 0.0,
+    confidence_level: float = 0.95,
+    simulations: int = 10000
+) -> dict:
+    """
+    Vectorized portfolio risk engine.
+    Computes: volatility, Sharpe, VaR (3 methods), Beta, correlation matrix, MC paths.
+    """
+    weights = np.array(weights)
+
+    # Ensure weights sum to 1.0
+    if not np.isclose(weights.sum(), 1.0):
+        weights = weights / weights.sum()
+
+    # ── Statistical Components ──────────────────────────────────────
     mean_returns = asset_returns.mean()
-    cov_matrix = asset_returns.cov()
-    corr_matrix = asset_returns.corr()
-    
-    # 3. Portfolio Return Series (Rp)
-    # Required for Beta computation: Rp = Sum(wi * Ri)
-    port_hist_returns = np.dot(asset_returns, weights)
-    
-    # 4. Performance Metrics
-    port_return = np.dot(weights, mean_returns)
-    port_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-    
-    # Annualized Sharpe (assuming daily returns)
-    r_f_daily = risk_free_rate / 252
-    sharpe = (port_return - r_f_daily) / port_vol if port_vol > 0 else 0
-    
-    # 5. Value at Risk (VaR)
-    # Historical VaR
-    hist_var = np.percentile(port_hist_returns, (1 - confidence_level) * 100)
-    
-    # Parametric VaR
-    z_score = norm.ppf(1 - confidence_level)
+    cov_matrix   = asset_returns.cov()
+    corr_matrix  = asset_returns.corr()
+
+    # ── Portfolio Historical Returns: Rp = w · R ───────────────────
+    port_hist_returns = np.dot(asset_returns.values, weights)
+
+    # ── Performance Metrics ─────────────────────────────────────────
+    port_return = float(np.dot(weights, mean_returns))
+    port_vol    = float(np.sqrt(weights.T @ cov_matrix.values @ weights))
+    r_f_daily   = risk_free_rate / 252
+    sharpe      = (port_return - r_f_daily) / port_vol if port_vol > 0 else 0.0
+
+    # ── Value at Risk ───────────────────────────────────────────────
+    hist_var      = float(np.percentile(port_hist_returns, (1 - confidence_level) * 100))
+    z_score       = norm.ppf(1 - confidence_level)
     parametric_var = port_return + z_score * port_vol
-    
-    # Monte Carlo VaR (with Cholesky for correlation preservation)
+
+    # ── Monte Carlo VaR (Cholesky for correlation preservation) ─────
     try:
-        L = np.linalg.cholesky(cov_matrix)
+        L = np.linalg.cholesky(cov_matrix.values)
     except np.linalg.LinAlgError:
-        # Fallback for near-singular matrices
-        clean_cov = cov_matrix + np.eye(len(cov_matrix)) * 1e-9
-        L = np.linalg.cholesky(clean_cov)
-        
-    Z = np.random.standard_normal((simulations, num_assets))
-    sim_asset_returns = mean_returns.values + np.dot(Z, L.T)
-    port_sim_returns = np.dot(sim_asset_returns, weights)
-    mc_var = np.percentile(port_sim_returns, (1 - confidence_level) * 100)
-    
-    # 7. Real Forward Path Simulation (for chart visualization)
-    # Generates T-day cumulative GBM paths using the same Cholesky matrix
+        L = np.linalg.cholesky(cov_matrix.values + np.eye(len(cov_matrix)) * 1e-9)
+
+    Z = np.random.standard_normal((simulations, len(weights)))
+    sim_returns  = mean_returns.values + np.dot(Z, L.T)
+    port_sim_ret = np.dot(sim_returns, weights)
+    mc_var       = float(np.percentile(port_sim_ret, (1 - confidence_level) * 100))
+
+    # ── Monte Carlo Forward Paths (for chart) ───────────────────────
     mc_chart_data = generate_mc_forward_paths(
         mean_returns=mean_returns,
         L=L,
         weights=weights,
-        num_assets=num_assets,
+        num_assets=len(weights),
         horizon=31,
-        path_simulations=5000  # High-fidelity: 5000 paths for accurate percentile bands
+        path_simulations=5000
     )
-    
-    # 6. Beta Calculation (Strict Cov/Var Formula)
-    # Beta = Cov(Rp, Rm) / Var(Rm)
-    # Rp is port_hist_returns, Rm is bench_returns
-    covariance_matrix = np.cov(port_hist_returns, bench_returns)
-    cov_rp_rm = covariance_matrix[0, 1]
-    var_rm = np.var(bench_returns)
-    
-    beta = cov_rp_rm / var_rm if var_rm > 0 else 1.0
-    
+
+    # ── Beta = Cov(Rp, Rm) / Var(Rm) ───────────────────────────────
+    bench_arr = bench_returns.values
+    cov_mat   = np.cov(port_hist_returns, bench_arr)
+    cov_rp_rm = cov_mat[0, 1]
+    var_rm    = np.var(bench_arr)
+    beta      = cov_rp_rm / var_rm if var_rm > 0 else 1.0
+
     return {
-        "portfolio_expected_return": float(port_return),
-        "portfolio_volatility": float(port_vol),
-        "sharpe_ratio": float(sharpe),
-        "historical_var_95": float(hist_var),
-        "parametric_var_95": float(parametric_var),
-        "monte_carlo_var_95": float(mc_var),
-        "beta": float(beta),
-        "correlation_matrix": corr_matrix.values.tolist(),
-        "asset_names": asset_names,
-        "benchmark_ticker": benchmark_ticker,
-        "mc_chart_data": mc_chart_data
+        "portfolio_expected_return": port_return,
+        "portfolio_volatility":      port_vol,
+        "sharpe_ratio":              float(sharpe),
+        "historical_var_95":         hist_var,
+        "parametric_var_95":         float(parametric_var),
+        "monte_carlo_var_95":        mc_var,
+        "beta":                      float(beta),
+        "correlation_matrix":        corr_matrix.values.tolist(),
+        "asset_names":               asset_names,
+        "benchmark_ticker":          benchmark_ticker,
+        "mc_chart_data":             mc_chart_data
     }
 
+
+# ═══════════════════════════════════════════════════════════════════
+# MODULE 6: Monte Carlo Forward Path Generator
+# Produces 31-day cumulative GBM paths for chart visualization.
+# ═══════════════════════════════════════════════════════════════════
 
 def generate_mc_forward_paths(
     mean_returns: pd.Series,
@@ -243,60 +389,38 @@ def generate_mc_forward_paths(
     weights: np.ndarray,
     num_assets: int,
     horizon: int = 31,
-    path_simulations: int = 500
+    path_simulations: int = 5000
 ) -> list:
     """
-    Generates T-day forward cumulative portfolio value paths using
-    multi-step Geometric Brownian Motion with Cholesky-correlated shocks.
-    Returns a list of dicts (one per day) for direct chart consumption.
+    Multi-step forward GBM simulation with Cholesky-correlated shocks.
+    Returns a list of 32 dicts (T+0 to T+31) for direct chart consumption.
     """
-    # Shape: (horizon, path_simulations, num_assets)
-    # Each day: draw fresh correlated Gaussian shocks
+    # Daily correlated shocks: (horizon, path_simulations, num_assets)
     Z_all = np.random.standard_normal((horizon, path_simulations, num_assets))
-    
-    # Daily correlated returns: shape (horizon, path_simulations)
-    # For each day: sim_daily_asset_returns = mu + Z @ L.T
-    daily_asset_returns = mean_returns.values + np.tensordot(Z_all, L.T, axes=([2], [0]))
-    # daily_asset_returns shape: (horizon, path_simulations, num_assets)
-    
-    # Portfolio daily returns: shape (horizon, path_simulations)
-    daily_port_returns = np.dot(daily_asset_returns, weights)
-    
-    # Cumulative product: start at 100, compound day by day
-    # Shape: (horizon+1, path_simulations) — index 0 = start value 100
+    daily_asset_ret = mean_returns.values + np.tensordot(Z_all, L.T, axes=([2], [0]))
+
+    # Portfolio daily returns: (horizon, path_simulations)
+    daily_port_ret = np.dot(daily_asset_ret, weights)
+
+    # Cumulative compounding: (horizon+1, path_simulations), base = 100
     cumulative = np.vstack([
         np.full((1, path_simulations), 100.0),
-        np.cumprod(1 + daily_port_returns, axis=0) * 100
+        np.cumprod(1 + daily_port_ret, axis=0) * 100
     ])
-    # cumulative shape: (horizon+1, path_simulations)
-    
-    # Build output: one record per day
+
     result = []
     for t in range(horizon + 1):
-        day_values = cumulative[t]  # shape: (path_simulations,)
-        
-        # Pick 3 representative paths by percentile rank
-        # Path 1: near-median (50th)
-        # Path 2: stress / bear (10th)
-        # Path 3: bull (90th)
-        p10, p25, p50, p75, p90 = np.percentile(day_values, [10, 25, 50, 75, 90])
-        
-        # Find actual simulation paths closest to those percentiles
-        idx_median = int(np.argmin(np.abs(day_values - p50)))
-        idx_stress = int(np.argmin(np.abs(day_values - p10)))
-        idx_bull   = int(np.argmin(np.abs(day_values - p90)))
-        
+        day_vals = cumulative[t]
+        p10, p50, p90 = np.percentile(day_vals, [10, 50, 90])
+
         result.append({
             "day": t,
-            "path1": round(float(day_values[idx_median]), 4),   # Median path
-            "path2": round(float(day_values[idx_stress]), 4),   # Stress (10th pct)
-            "path3": round(float(day_values[idx_bull]),   4),   # Bull   (90th pct)
+            "path1": round(float(day_vals[int(np.argmin(np.abs(day_vals - p50)))]), 4),  # Median
+            "path2": round(float(day_vals[int(np.argmin(np.abs(day_vals - p10)))]), 4),  # Stress
+            "path3": round(float(day_vals[int(np.argmin(np.abs(day_vals - p90)))]), 4),  # Bull
             "median": round(float(p50), 4),
-            "var95":  round(float(np.percentile(day_values, 5)), 4),
-            "confidenceBand": [
-                round(float(p10), 4),
-                round(float(p90), 4)
-            ]
+            "var95":  round(float(np.percentile(day_vals, 5)), 4),
+            "confidenceBand": [round(float(p10), 4), round(float(p90), 4)]
         })
-    
+
     return result
