@@ -163,6 +163,40 @@ def get_risk_metrics(
     sim_asset_returns = mean_returns.values + np.dot(Z, L.T)
     port_sim_returns = np.dot(sim_asset_returns, weights)
     mc_var = np.percentile(port_sim_returns, (1 - confidence_level) * 100)
+
+    # 6. Multi-day Simulation Paths (30-day horizon)
+    # Simulate full time-series paths using Cholesky GBM
+    # Each path: cumulative portfolio value starting at 100
+    horizon = 30
+    # Shape: (simulations, horizon, num_assets)
+    # Generate all daily shocks at once — fully vectorized
+    Z_multi = np.random.standard_normal((simulations, horizon, num_assets))
+    # Apply Cholesky: correlated daily shocks
+    # daily_asset_returns shape: (simulations, horizon, num_assets)
+    daily_asset_returns = mean_returns.values + np.einsum('ijk,lk->ijl', Z_multi, L)
+    # Portfolio daily returns: (simulations, horizon)
+    daily_port_returns = np.dot(daily_asset_returns, weights)
+    # Prepend day 0 (value = 100)
+    start_col = np.ones((simulations, 1))
+    # Cumulative product of (1 + r) across days
+    cumulative_returns = np.cumprod(1 + daily_port_returns, axis=1)
+    # Multiply by initial value of 100, prepend day 0
+    portfolio_values = np.hstack([np.ones((simulations, 1)) * 100, 100 * cumulative_returns])
+    
+    # Compute percentile bands per day (shape: 5 x 31)
+    percentiles = np.percentile(portfolio_values, [5, 25, 50, 75, 95], axis=0)
+    
+    simulation_paths = [
+        {
+            "day": int(t),
+            "p5":  round(float(percentiles[0, t]), 4),
+            "p25": round(float(percentiles[1, t]), 4),
+            "p50": round(float(percentiles[2, t]), 4),
+            "p75": round(float(percentiles[3, t]), 4),
+            "p95": round(float(percentiles[4, t]), 4),
+        }
+        for t in range(horizon + 1)
+    ]
     
     # 6. Beta Calculation (Strict Cov/Var Formula)
     # Beta = Cov(Rp, Rm) / Var(Rm)
@@ -183,5 +217,6 @@ def get_risk_metrics(
         "beta": float(beta),
         "correlation_matrix": corr_matrix.values.tolist(),
         "asset_names": asset_names,
-        "benchmark_ticker": benchmark_ticker
+        "benchmark_ticker": benchmark_ticker,
+        "simulation_paths": simulation_paths
     }
