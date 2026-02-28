@@ -48,33 +48,45 @@ def preprocess_portfolio_data(df: pd.DataFrame, benchmark_ticker: str):
     Standardizes CSV data (assets only) and fetches benchmark returns.
     Aligns both series by date.
     """
-    # 1. Standardize Dates in CSV
-    df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
-    df = df.sort_values(by=df.columns[0])
-    df = df.set_index(df.columns[0])
+    # 1. Identify and parse the Date column (always the first column)
+    date_col_name = df.columns[0]
     
-    # Forward fill missing asset prices
+    # Convert to datetime, coerce errors to NaT
+    df[date_col_name] = pd.to_datetime(df[date_col_name], errors='coerce')
+    
+    # Drop any rows where the date couldn't be parsed
+    df = df.dropna(subset=[date_col_name])
+    
+    # Sort by date ascending
+    df = df.sort_values(by=date_col_name)
+    
+    # Set date as index and remove from columns
+    df = df.set_index(date_col_name)
+    
+    # Convert all asset columns to numeric, drop non-numeric
+    df = df.apply(pd.to_numeric, errors='coerce')
+    
+    # Forward fill small gaps, then drop remaining NaNs
     df = df.ffill().dropna()
     
-    # 2. Extract Date Range (Ensure we get single scalar values)
-    raw_start = df.index.min()
-    raw_end = df.index.max()
+    if df.empty:
+        raise HTTPException(status_code=400, detail="CSV is empty after cleaning. Check your date and price columns.")
+
+    # 2. Extract scalar start/end dates
+    # Use Python's built-in string conversion to guarantee scalar str output
+    start_date = str(df.index.min().date())
+    end_date   = str((df.index.max() + pd.Timedelta(days=1)).date())
     
-    if pd.isna(raw_start) or pd.isna(raw_end):
-        raise HTTPException(status_code=400, detail="CSV contains invalid or empty dates.")
-        
-    start_date = pd.to_datetime(raw_start).strftime('%Y-%m-%d')
-    # End date + 1 to ensure the last day is captured in yfinance
-    end_date = (pd.to_datetime(raw_end) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    # Capture asset names before any transformation
+    asset_names = df.columns.tolist()
     
     # 3. Calculate Asset Returns
     asset_returns = df.pct_change().dropna()
     
-    # 4. Fetch Benchmark Returns
+    # 4. Fetch Benchmark Returns from yfinance
     bench_returns = fetch_benchmark_returns(benchmark_ticker, start_date, end_date)
     
-    # 5. Alignment
-    # Combine asset returns and benchmark returns on shared dates
+    # 5. Date Alignment — inner join on common trading days
     combined = pd.concat([asset_returns, bench_returns], axis=1).dropna()
     
     if len(combined) < 30:
@@ -87,7 +99,8 @@ def preprocess_portfolio_data(df: pd.DataFrame, benchmark_ticker: str):
     final_asset_returns = combined.drop(columns=["Benchmark_Returns"])
     final_bench_returns = combined["Benchmark_Returns"]
     
-    return final_asset_returns, final_bench_returns, df.columns.tolist()
+    return final_asset_returns, final_bench_returns, asset_names
+
 
 def get_risk_metrics(
     asset_returns: pd.DataFrame, 
