@@ -5,13 +5,15 @@ import yfinance as yf
 from fastapi import HTTPException
 from typing import List, Optional
 
-def fetch_benchmark_from_yfinance(ticker: str, start_date: str, end_date: str) -> pd.Series:
+def fetch_benchmark_returns(ticker: str, start_date: str, end_date: str) -> pd.Series:
     """
-    Fetches historical adjusted close prices for a given ticker or index.
+    Fetches historical adjusted close prices for a given ticker and returns daily percentage returns.
     """
     try:
         # Fetching data using yfinance
-        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        # Use a slightly wider buffer to ensure returns can be calculated for the first date
+        start_buffer = (pd.to_datetime(start_date) - pd.Timedelta(days=5)).strftime('%Y-%m-%d')
+        df = yf.download(ticker, start=start_buffer, end=end_date, progress=False)
         
         if df.empty:
             raise ValueError(f"No price data found for benchmark ticker: {ticker}")
@@ -33,123 +35,58 @@ def fetch_benchmark_from_yfinance(ticker: str, start_date: str, end_date: str) -
         if isinstance(benchmark_series, pd.DataFrame):
             benchmark_series = benchmark_series.iloc[:, 0]
             
-        return benchmark_series.dropna()
+        # Calculate returns and drop NaNs
+        returns = benchmark_series.pct_change().dropna()
+        returns.name = "Benchmark_Returns"
+        return returns
     
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch benchmark data for {ticker}: {str(e)}")
 
-def build_blended_benchmark_returns(
-    tickers: List[str],
-    weights: List[float],
-    start_date: str,
-    end_date: str
-) -> pd.Series:
+def preprocess_portfolio_data(df: pd.DataFrame, benchmark_ticker: str):
     """
-    Fetches and blends multiple index returns based on weights.
+    Standardizes CSV data (assets only) and fetches benchmark returns.
+    Aligns both series by date.
     """
-    returns_list = []
-    
-    for ticker in tickers:
-        prices = fetch_benchmark_from_yfinance(ticker, start_date, end_date)
-        returns = prices.pct_change().dropna()
-        returns.name = ticker
-        returns_list.append(returns)
-        
-    # Align all return series
-    combined_bench = pd.concat(returns_list, axis=1).dropna()
-    
-    if combined_bench.empty:
-        raise HTTPException(status_code=400, detail="No overlapping dates found for the specified benchmark tickers.")
-
-    # Apply weights and sum
-    weights_arr = np.array(weights)
-    blended_returns = (combined_bench * weights_arr).sum(axis=1)
-    
-    return blended_returns
-
-def preprocess_blended_data(
-    df: pd.DataFrame, 
-    benchmark_tickers: Optional[List[str]] = None, 
-    benchmark_weights: Optional[List[float]] = None
-):
-    """
-    Implements Blended Benchmark Logic.
-    """
-    # 1. Standardize Dates
+    # 1. Standardize Dates in CSV
     df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
     df = df.sort_values(by=df.columns[0])
     df = df.set_index(df.columns[0])
+    
+    # Forward fill missing asset prices
     df = df.ffill().dropna()
-
-    benchmark_type = "single"
-    benchmark_source = None
-    bench_returns_series = None
-    benchmark_components = None
     
-    # 2. Benchmark Logic
-    # A) Check CSV for 'Benchmark' column
-    benchmark_col = next((c for c in df.columns if c.lower() == 'benchmark'), None)
+    # 2. Extract Date Range
+    start_date = df.index.min().strftime('%Y-%m-%d')
+    # End date + 1 to ensure the last day is included in yfinance download
+    end_date = (df.index.max() + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
     
-    start_date_str = df.index.min().strftime('%Y-%m-%d')
-    end_date_str = (df.index.max() + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-
-    if benchmark_col:
-        # CSV-based Benchmark
-        bench_prices = df[benchmark_col]
-        bench_returns_series = bench_prices.pct_change().dropna()
-        assets_df = df.drop(columns=[benchmark_col])
-        benchmark_source = "csv"
-    elif benchmark_tickers and benchmark_weights:
-        # Blended yfinance Benchmark
-        if len(benchmark_tickers) != len(benchmark_weights):
-            raise HTTPException(status_code=400, detail="Benchmark tickers and weights must have the same length.")
-        
-        if not np.isclose(np.sum(benchmark_weights), 1.0, atol=1e-6):
-            raise HTTPException(status_code=400, detail="Benchmark weights must sum to 1.0.")
-
-        bench_returns_series = build_blended_benchmark_returns(benchmark_tickers, benchmark_weights, start_date_str, end_date_str)
-        assets_df = df
-        benchmark_source = "yfinance"
-        benchmark_type = "blended"
-        benchmark_components = [{"ticker": t, "weight": w} for t, w in zip(benchmark_tickers, benchmark_weights)]
-    elif benchmark_tickers: # Single ticker optimization
-        # Handle as single ticker
-        bench_prices = fetch_benchmark_from_yfinance(benchmark_tickers[0], start_date_str, end_date_str)
-        bench_returns_series = bench_prices.pct_change().dropna()
-        assets_df = df
-        benchmark_source = "yfinance"
-        benchmark_type = "single"
-        benchmark_components = [{"ticker": benchmark_tickers[0], "weight": 1.0}]
-    else:
-        raise HTTPException(
-            status_code=400, 
-            detail="No benchmark provided. Provide a 'Benchmark' column in CSV or 'benchmark_tickers'."
-        )
-
-    # 3. Clean and Align
-    asset_returns = assets_df.pct_change().dropna()
+    # 3. Calculate Asset Returns
+    asset_returns = df.pct_change().dropna()
     
-    # Align dates
-    bench_returns_df = bench_returns_series.to_frame(name='Benchmark_Returns')
-    combined = pd.concat([asset_returns, bench_returns_df], axis=1).dropna()
+    # 4. Fetch Benchmark Returns
+    bench_returns = fetch_benchmark_returns(benchmark_ticker, start_date, end_date)
+    
+    # 5. Alignment
+    # Combine asset returns and benchmark returns on shared dates
+    combined = pd.concat([asset_returns, bench_returns], axis=1).dropna()
     
     if len(combined) < 30:
         raise HTTPException(
             status_code=400, 
-            detail=f"Sample size too small after alignment ({len(combined)} observations). Minimum 30 required."
+            detail=f"Sample size too small after date alignment ({len(combined)} overlapping days). Minimum 30 required."
         )
     
-    final_asset_returns = combined.drop(columns=['Benchmark_Returns'])
-    final_bench_returns = combined['Benchmark_Returns']
+    # Separate back into assets and benchmark
+    final_asset_returns = combined.drop(columns=["Benchmark_Returns"])
+    final_bench_returns = combined["Benchmark_Returns"]
     
-    return final_asset_returns, final_bench_returns, benchmark_source, benchmark_type, benchmark_components, assets_df.columns.tolist()
+    return final_asset_returns, final_bench_returns, df.columns.tolist()
 
 def get_risk_metrics(
     asset_returns: pd.DataFrame, 
     bench_returns: pd.Series, 
-    benchmark_source: str, 
-    benchmark_type: str,
-    benchmark_components: Optional[List[dict]],
+    benchmark_ticker: str,
     asset_names: List[str], 
     weights: Optional[List[float]] = None, 
     risk_free_rate: float = 0.0, 
@@ -157,35 +94,49 @@ def get_risk_metrics(
     simulations: int = 10000
 ):
     """
-    Computation engine for blended benchmark beta and tail risk.
+    Computation engine for portfolio risk analytics using standardized Beta formula.
     """
     num_assets = asset_returns.shape[1]
     
+    # 1. Weights Handling
     if weights is None:
         weights = np.array([1.0 / num_assets] * num_assets)
     else:
         weights = np.array(weights)
-        weights = weights / np.sum(weights)
+        # Ensure weights sum to 1.0
+        if not np.isclose(np.sum(weights), 1.0):
+            weights = weights / np.sum(weights)
 
+    # 2. Statistical Components
     mean_returns = asset_returns.mean()
     cov_matrix = asset_returns.cov()
     corr_matrix = asset_returns.corr()
     
+    # 3. Portfolio Return Series (Rp)
+    # Required for Beta computation: Rp = Sum(wi * Ri)
     port_hist_returns = np.dot(asset_returns, weights)
     
+    # 4. Performance Metrics
     port_return = np.dot(weights, mean_returns)
     port_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+    
+    # Annualized Sharpe (assuming daily returns)
     r_f_daily = risk_free_rate / 252
     sharpe = (port_return - r_f_daily) / port_vol if port_vol > 0 else 0
     
+    # 5. Value at Risk (VaR)
+    # Historical VaR
     hist_var = np.percentile(port_hist_returns, (1 - confidence_level) * 100)
     
+    # Parametric VaR
     z_score = norm.ppf(1 - confidence_level)
     parametric_var = port_return + z_score * port_vol
     
+    # Monte Carlo VaR (with Cholesky for correlation preservation)
     try:
         L = np.linalg.cholesky(cov_matrix)
     except np.linalg.LinAlgError:
+        # Fallback for near-singular matrices
         clean_cov = cov_matrix + np.eye(len(cov_matrix)) * 1e-9
         L = np.linalg.cholesky(clean_cov)
         
@@ -194,10 +145,14 @@ def get_risk_metrics(
     port_sim_returns = np.dot(sim_asset_returns, weights)
     mc_var = np.percentile(port_sim_returns, (1 - confidence_level) * 100)
     
-    # Beta = Cov(Rp, Rb) / Var(Rb)
-    cov_rp_rb = np.cov(port_hist_returns, bench_returns)[0, 1]
-    var_rb = np.var(bench_returns)
-    beta = cov_rp_rb / var_rb if var_rb != 0 else 1.0
+    # 6. Beta Calculation (Strict Cov/Var Formula)
+    # Beta = Cov(Rp, Rm) / Var(Rm)
+    # Rp is port_hist_returns, Rm is bench_returns
+    covariance_matrix = np.cov(port_hist_returns, bench_returns)
+    cov_rp_rm = covariance_matrix[0, 1]
+    var_rm = np.var(bench_returns)
+    
+    beta = cov_rp_rm / var_rm if var_rm > 0 else 1.0
     
     return {
         "portfolio_expected_return": float(port_return),
@@ -209,7 +164,5 @@ def get_risk_metrics(
         "beta": float(beta),
         "correlation_matrix": corr_matrix.values.tolist(),
         "asset_names": asset_names,
-        "benchmark_source": benchmark_source,
-        "benchmark_type": benchmark_type,
-        "benchmark_components": benchmark_components
+        "benchmark_ticker": benchmark_ticker
     }

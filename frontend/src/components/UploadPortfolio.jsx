@@ -1,23 +1,31 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UploadCloud, CheckCircle2, FileSpreadsheet } from 'lucide-react';
+import { UploadCloud, CheckCircle2, FileSpreadsheet, Globe } from 'lucide-react';
 
 const UploadPortfolio = ({ onUploadSuccess }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [ticker, setTicker] = useState('^NSEI'); // Default to Nifty 50
     const fileInputRef = useRef(null);
 
     const handleFileChange = async (event) => {
         const file = event.target.files[0];
         if (!file) return;
 
+        if (!ticker) {
+            setError("Please enter a benchmark ticker first.");
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
 
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('benchmark_ticker', ticker);
+
         // Default parameters
         formData.append('confidence_level', '0.95');
-        formData.append('simulations', '5000'); // Reduced for faster feedback
+        formData.append('simulations', '5000');
 
         try {
             const response = await fetch('http://localhost:8000/analyze', {
@@ -48,7 +56,24 @@ const UploadPortfolio = ({ onUploadSuccess }) => {
 
     return (
         <div className="glass-panel rounded-xl p-5 h-full flex flex-col relative overflow-hidden group">
-            <h2 className="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider relative z-10">Portfolio Data</h2>
+            <h2 className="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider relative z-10">Risk Analytics Configuration</h2>
+
+            {/* Benchmark Selection */}
+            <div className="mb-4 relative z-10">
+                <label className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-1.5 block">Market Benchmark</label>
+                <div className="relative">
+                    <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                        <Globe size={14} className="text-cyan-500" />
+                    </div>
+                    <input
+                        type="text"
+                        value={ticker}
+                        onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                        placeholder="e.g. ^NSEI, SPY, BTC-USD"
+                        className="w-full bg-slate-900/60 border border-slate-700/50 rounded-lg py-2 pl-9 pr-4 text-xs font-mono text-slate-100 focus:outline-none focus:border-cyan-500/50 transition-all"
+                    />
+                </div>
+            </div>
 
             <input
                 type="file"
@@ -65,7 +90,7 @@ const UploadPortfolio = ({ onUploadSuccess }) => {
                 {isLoading ? (
                     <div className="flex flex-col items-center gap-3">
                         <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
-                        <p className="text-xs text-cyan-400 font-medium tracking-tight">Processing Matrix...</p>
+                        <p className="text-xs text-cyan-400 font-medium tracking-tight">Fetching Market Data...</p>
                     </div>
                 ) : (
                     <>
@@ -75,23 +100,34 @@ const UploadPortfolio = ({ onUploadSuccess }) => {
                                 <UploadCloud className="w-6 h-6 text-slate-400 group-hover:text-cyan-400 transition-colors" />
                             </div>
                         </div>
-                        <p className="text-sm font-medium text-slate-200 text-center">
-                            {error ? 'Try Again' : 'Upload Portfolio CSV'}
+                        <p className="text-sm font-medium text-slate-200 text-center uppercase tracking-tighter">
+                            {error ? 'Review Config' : 'Upload Assets CSV'}
                         </p>
-                        {error && <p className="text-[10px] text-rose-400 mt-1 max-w-[150px] text-center line-clamp-1">{error}</p>}
+                        {error && <p className="text-[10px] text-rose-400 mt-1 max-w-[200px] text-center">{error}</p>}
                     </>
                 )}
             </div>
 
-            <div className="mt-4 bg-gradient-to-r from-emerald-950/40 to-slate-900/40 border border-emerald-900/30 rounded-lg p-3 flex items-start gap-3 relative z-10 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                <div className="relative mt-0.5">
-                    <span className="absolute inset-0 bg-emerald-500 blur-sm opacity-40 rounded-full"></span>
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 relative z-10" />
+            <div className="mt-4 bg-slate-900/60 border border-slate-800/50 rounded-lg p-3 relative z-10">
+                <div className="flex items-center gap-2 mb-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]"></div>
+                    <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Global Data Standard</p>
                 </div>
-                <div>
-                    <p className="text-xs font-semibold text-emerald-300 tracking-wide">Standardized Format</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5 font-mono">DATE • ASSETS... • BENCHMARK</p>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                    <div className="flex flex-col gap-1 p-2 bg-slate-800/40 rounded border border-slate-700/30 text-center">
+                        <span className="text-[8px] text-slate-500 font-mono uppercase tracking-tighter">Col 1</span>
+                        <span className="text-[10px] text-cyan-400 font-bold font-mono">DATE</span>
+                    </div>
+                    <div className="flex flex-col gap-1 p-2 bg-slate-800/40 rounded border border-slate-700/30 text-center">
+                        <span className="text-[8px] text-slate-500 font-mono uppercase tracking-tighter">Cols 2...N</span>
+                        <span className="text-[10px] text-indigo-400 font-bold font-mono">ASSET PRICES</span>
+                    </div>
                 </div>
+
+                <p className="text-[9px] text-slate-500 mt-2 font-medium italic border-t border-slate-800/50 pt-2 text-center uppercase tracking-tighter">
+                    Note: CSV should contain only asset prices. Benchmark is fetched via ticker.
+                </p>
             </div>
         </div>
     );
