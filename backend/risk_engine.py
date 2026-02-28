@@ -13,11 +13,13 @@ from typing import List, Optional, Tuple
 # Extracts tickers and weights from a broker-style export CSV.
 # ═══════════════════════════════════════════════════════════════════
 
-def parse_holdings_csv(df: pd.DataFrame) -> Tuple[List[str], List[float]]:
+def parse_holdings_csv(df: pd.DataFrame) -> Tuple[List[str], List[float], float]:
     """
     Parses a broker-style holdings CSV.
     Required columns: 'Ticker', 'Portfolio Weight %'
-    Returns: (tickers: List[str], weights: List[float]) — weights are decimals summing to 1.0
+    Optional column : any column containing 'Current Value' (for dollar VaR)
+    Returns: (tickers, weights, portfolio_value)
+      - portfolio_value: total current market value in ₹ (0.0 if column not found)
     """
     # Normalize column names — strip surrounding whitespace
     df.columns = [str(c).strip() for c in df.columns]
@@ -33,6 +35,28 @@ def parse_holdings_csv(df: pd.DataFrame) -> Tuple[List[str], List[float]]:
                 "Ensure 'Ticker' and 'Portfolio Weight %' columns are present."
             )
         )
+
+    # ── Detect portfolio value column (fuzzy: any col with 'current value') ──
+    portfolio_value = 0.0
+    value_col = next(
+        (c for c in df.columns if 'current value' in c.lower()),
+        None
+    )
+    if value_col is None:
+        # Fallback: try 'Invested Value'
+        value_col = next(
+            (c for c in df.columns if 'invested value' in c.lower()),
+            None
+        )
+    if value_col:
+        numeric_vals = pd.to_numeric(
+            df[value_col].astype(str)
+                .str.replace(',', '', regex=False)
+                .str.replace('₹', '', regex=False)
+                .str.strip(),
+            errors='coerce'
+        )
+        portfolio_value = float(numeric_vals.dropna().sum())
 
     # Work only with the two critical columns
     holdings = df[['Ticker', 'Portfolio Weight %']].copy()
@@ -69,7 +93,7 @@ def parse_holdings_csv(df: pd.DataFrame) -> Tuple[List[str], List[float]]:
     tickers = holdings['Ticker'].tolist()
     weights = holdings['weight_decimal'].round(8).tolist()
 
-    return tickers, weights
+    return tickers, weights, portfolio_value
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -271,7 +295,7 @@ def preprocess_broker_data(
     Returns: (asset_returns, bench_returns, weights, asset_names)
     """
     # Step 1: Parse holdings from the broker CSV
-    tickers, weights = parse_holdings_csv(df)
+    tickers, weights, portfolio_value = parse_holdings_csv(df)
 
     # Step 2: Define date range for historical data fetch
     end_date   = datetime.today().strftime('%Y-%m-%d')
@@ -303,15 +327,15 @@ def preprocess_broker_data(
     final_bench_returns = combined["Benchmark_Returns"]
 
     # Reorder weights to match final asset columns (after any column drops in alignment)
-    final_tickers  = final_asset_returns.columns.tolist()
+    final_tickers    = final_asset_returns.columns.tolist()
     ticker_to_weight = dict(zip(tickers, weights))
-    final_weights = [ticker_to_weight[t] for t in final_tickers]
+    final_weights    = [ticker_to_weight[t] for t in final_tickers]
 
-    # Re-normalize in case any tickers were dropped  
+    # Re-normalize in case any tickers were dropped
     total = sum(final_weights)
     final_weights = [w / total for w in final_weights]
 
-    return final_asset_returns, final_bench_returns, final_weights, final_tickers
+    return final_asset_returns, final_bench_returns, final_weights, final_tickers, portfolio_value
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -325,6 +349,7 @@ def get_risk_metrics(
     benchmark_ticker: str,
     asset_names: List[str],
     weights: List[float],
+    portfolio_value: float = 0.0,      # Total current market value (₹); 0 = use % only
     risk_free_rate: float = 0.0,
     confidence_level: float = 0.95,
     simulations: int = 10000
@@ -368,6 +393,12 @@ def get_risk_metrics(
         confidence_level=confidence_level    # propagate caller's CI (default 0.95)
     )
 
+    # Dollar VaR: VaR_₹ = -1 × percentile_loss × portfolio_value
+    # mc['var95'] is the 5th-percentile return (negative = loss)
+    # Multiplying by -1 makes it a positive loss amount
+    mc_var_pct    = mc["var95"]          # e.g. -0.12 means -12% over 30 days
+    mc_var_dollar = (-1 * mc_var_pct * portfolio_value) if portfolio_value > 0 else None
+
     # ── Monte Carlo Forward Paths (for chart) ───────────────────────
     mc_chart_data = generate_mc_forward_paths(
         mean=mean_returns.values,
@@ -392,11 +423,13 @@ def get_risk_metrics(
         "historical_var_95":               hist_var,
         "parametric_var_95":               float(parametric_var),
         # Monte Carlo 30-day compounded metrics
-        "monte_carlo_var_95":              mc["var95"],        # Alias for risk gauge compat
+        "monte_carlo_var_95":              mc_var_pct,          # % return (alias for risk gauge)
         "monte_carlo_expected_return_30d": mc["expected"],
         "monte_carlo_volatility_30d":      mc["volatility"],
         "monte_carlo_sharpe_30d":          mc["sharpe"],
-        "monte_carlo_var95_30d":           mc["var95"],
+        "monte_carlo_var95_30d":           mc_var_pct,          # 30-day % loss at 95% CI
+        "monte_carlo_var95_dollar":        mc_var_dollar,       # ₹ amount (null if no value in CSV)
+        "portfolio_value":                 portfolio_value if portfolio_value > 0 else None,
         # Meta
         "beta":                            float(beta),
         "correlation_matrix":              corr_matrix.values.tolist(),

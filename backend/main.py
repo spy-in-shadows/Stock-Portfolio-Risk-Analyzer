@@ -66,7 +66,7 @@ async def analyze_portfolio(
             )
 
         # 2. Parse holdings + fetch prices + align benchmark
-        asset_returns, bench_returns, weights, asset_names = preprocess_broker_data(
+        asset_returns, bench_returns, weights, asset_names, portfolio_value = preprocess_broker_data(
             df=df,
             benchmark_ticker=benchmark_ticker,
             history_days=history_days
@@ -79,6 +79,7 @@ async def analyze_portfolio(
             benchmark_ticker=benchmark_ticker,
             asset_names=asset_names,
             weights=weights,
+            portfolio_value=portfolio_value,
             risk_free_rate=risk_free_rate,
             confidence_level=confidence_level,
             simulations=simulations
