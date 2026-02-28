@@ -7,41 +7,68 @@ from typing import List, Optional
 
 def fetch_benchmark_returns(ticker: str, start_date: str, end_date: str) -> pd.Series:
     """
-    Fetches historical adjusted close prices for a given ticker and returns daily percentage returns.
+    Fetches historical prices for a given ticker and returns daily percentage returns.
+    Handles yfinance 0.2.x API (auto_adjust=True, MultiIndex columns).
     """
     try:
-        # Fetching data using yfinance
-        # Use a slightly wider buffer to ensure returns can be calculated for the first date
+        # Add a small buffer before start_date so returns on the first day are calculatable
         start_buffer = (pd.to_datetime(start_date) - pd.Timedelta(days=5)).strftime('%Y-%m-%d')
-        df = yf.download(ticker, start=start_buffer, end=end_date, progress=False)
-        
-        if df.empty:
-            raise ValueError(f"No price data found for benchmark ticker: {ticker}")
-        
-        # Extract 'Adj Close'
-        if 'Adj Close' in df:
-            benchmark_series = df['Adj Close']
-        else:
-            # Check for MultiIndex
-            if isinstance(df.columns, pd.MultiIndex):
-                if 'Adj Close' in df.columns.get_level_values(0):
-                    benchmark_series = df['Adj Close']
-                else:
-                    benchmark_series = df['Close']
+
+        # auto_adjust=True (default in 0.2.x) folds Adj Close into Close
+        df = yf.download(
+            ticker,
+            start=start_buffer,
+            end=end_date,
+            progress=False,
+            auto_adjust=True   # 'Close' = adjusted; no 'Adj Close' column
+        )
+
+        if df is None or df.empty:
+            raise ValueError(f"No price data found for benchmark ticker: '{ticker}'. "
+                             "Verify the ticker is correct and has data for the selected date range.")
+
+        # --- Robust column extraction (handles MultiIndex from yfinance 0.2.x) ---
+        if isinstance(df.columns, pd.MultiIndex):
+            # Flatten: prefer 'Close', fallback to 'Adj Close'
+            level0 = df.columns.get_level_values(0)
+            if 'Close' in level0:
+                price_series = df['Close'].iloc[:, 0]
+            elif 'Adj Close' in level0:
+                price_series = df['Adj Close'].iloc[:, 0]
             else:
-                benchmark_series = df['Close']
-                
-        # Handle cases where multiple tickers were somehow downloaded (flatten)
-        if isinstance(benchmark_series, pd.DataFrame):
-            benchmark_series = benchmark_series.iloc[:, 0]
-            
-        # Calculate returns and drop NaNs
-        returns = benchmark_series.pct_change().dropna()
+                raise ValueError(f"Could not find a price column for '{ticker}'. "
+                                 f"Available columns: {list(level0.unique())}")
+        else:
+            # Flat columns
+            if 'Close' in df.columns:
+                price_series = df['Close']
+            elif 'Adj Close' in df.columns:
+                price_series = df['Adj Close']
+            else:
+                raise ValueError(f"Could not find a price column for '{ticker}'. "
+                                 f"Available columns: {list(df.columns)}")
+
+        # Guarantee it is a 1-D Series
+        if isinstance(price_series, pd.DataFrame):
+            price_series = price_series.iloc[:, 0]
+
+        price_series = price_series.dropna()
+
+        if price_series.empty:
+            raise ValueError(f"Price series for '{ticker}' is empty after dropping NaNs.")
+
+        returns = price_series.pct_change().dropna()
         returns.name = "Benchmark_Returns"
         return returns
-    
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch benchmark data for {ticker}: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to fetch benchmark data for '{ticker}': {str(e)}"
+        )
+
 
 def preprocess_portfolio_data(df: pd.DataFrame, benchmark_ticker: str):
     """
