@@ -13,13 +13,11 @@ from typing import List, Optional, Tuple
 # Extracts tickers and weights from a broker-style export CSV.
 # ═══════════════════════════════════════════════════════════════════
 
-def parse_holdings_csv(df: pd.DataFrame) -> Tuple[List[str], List[float], float]:
+def parse_holdings_csv(df: pd.DataFrame) -> Tuple[List[str], List[float]]:
     """
     Parses a broker-style holdings CSV.
     Required columns: 'Ticker', 'Portfolio Weight %'
-    Optional column : any column containing 'Current Value' (for dollar VaR)
-    Returns: (tickers, weights, portfolio_value)
-      - portfolio_value: total current market value in ₹ (0.0 if column not found)
+    Returns: (tickers: List[str], weights: List[float]) — weights are decimals summing to 1.0
     """
     # Normalize column names — strip surrounding whitespace
     df.columns = [str(c).strip() for c in df.columns]
@@ -35,28 +33,6 @@ def parse_holdings_csv(df: pd.DataFrame) -> Tuple[List[str], List[float], float]
                 "Ensure 'Ticker' and 'Portfolio Weight %' columns are present."
             )
         )
-
-    # ── Detect portfolio value column (fuzzy: any col with 'current value') ──
-    portfolio_value = 0.0
-    value_col = next(
-        (c for c in df.columns if 'current value' in c.lower()),
-        None
-    )
-    if value_col is None:
-        # Fallback: try 'Invested Value'
-        value_col = next(
-            (c for c in df.columns if 'invested value' in c.lower()),
-            None
-        )
-    if value_col:
-        numeric_vals = pd.to_numeric(
-            df[value_col].astype(str)
-                .str.replace(',', '', regex=False)
-                .str.replace('₹', '', regex=False)
-                .str.strip(),
-            errors='coerce'
-        )
-        portfolio_value = float(numeric_vals.dropna().sum())
 
     # Work only with the two critical columns
     holdings = df[['Ticker', 'Portfolio Weight %']].copy()
@@ -93,7 +69,7 @@ def parse_holdings_csv(df: pd.DataFrame) -> Tuple[List[str], List[float], float]
     tickers = holdings['Ticker'].tolist()
     weights = holdings['weight_decimal'].round(8).tolist()
 
-    return tickers, weights, portfolio_value
+    return tickers, weights
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -295,7 +271,7 @@ def preprocess_broker_data(
     Returns: (asset_returns, bench_returns, weights, asset_names)
     """
     # Step 1: Parse holdings from the broker CSV
-    tickers, weights, portfolio_value = parse_holdings_csv(df)
+    tickers, weights = parse_holdings_csv(df)
 
     # Step 2: Define date range for historical data fetch
     end_date   = datetime.today().strftime('%Y-%m-%d')
@@ -327,15 +303,15 @@ def preprocess_broker_data(
     final_bench_returns = combined["Benchmark_Returns"]
 
     # Reorder weights to match final asset columns (after any column drops in alignment)
-    final_tickers    = final_asset_returns.columns.tolist()
+    final_tickers  = final_asset_returns.columns.tolist()
     ticker_to_weight = dict(zip(tickers, weights))
-    final_weights    = [ticker_to_weight[t] for t in final_tickers]
+    final_weights = [ticker_to_weight[t] for t in final_tickers]
 
-    # Re-normalize in case any tickers were dropped
+    # Re-normalize in case any tickers were dropped  
     total = sum(final_weights)
     final_weights = [w / total for w in final_weights]
 
-    return final_asset_returns, final_bench_returns, final_weights, final_tickers, portfolio_value
+    return final_asset_returns, final_bench_returns, final_weights, final_tickers
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -349,14 +325,12 @@ def get_risk_metrics(
     benchmark_ticker: str,
     asset_names: List[str],
     weights: List[float],
-    portfolio_value: float = 0.0,      # Total current market value (₹); 0 = use % only
-    risk_free_rate: float = 0.0,
     confidence_level: float = 0.95,
     simulations: int = 10000
 ) -> dict:
     """
     Vectorized portfolio risk engine.
-    Computes: volatility, Sharpe, VaR (3 methods), Beta, correlation matrix, MC paths.
+    Computes: volatility, VaR (3 methods), Beta, correlation matrix, MC paths.
     """
     weights = np.array(weights)
 
@@ -372,11 +346,9 @@ def get_risk_metrics(
     # ── Portfolio Historical Returns: Rp = w · R ───────────────────
     port_hist_returns = np.dot(asset_returns.values, weights)
 
-    # ── Performance Metrics ─────────────────────────────────────────
+    # ── Portfolio Return & Volatility ──────────────────────────────
     port_return = float(np.dot(weights, mean_returns))
     port_vol    = float(np.sqrt(weights.T @ cov_matrix.values @ weights))
-    r_f_daily   = risk_free_rate / 252
-    sharpe      = (port_return - r_f_daily) / port_vol if port_vol > 0 else 0.0
 
     # ── Value at Risk ───────────────────────────────────────────────
     hist_var      = float(np.percentile(port_hist_returns, (1 - confidence_level) * 100))
@@ -390,14 +362,8 @@ def get_risk_metrics(
         weights=weights,
         simulations=simulations,
         horizon_days=30,
-        confidence_level=confidence_level    # propagate caller's CI (default 0.95)
+        confidence_level=confidence_level
     )
-
-    # Dollar VaR: VaR_₹ = -1 × percentile_loss × portfolio_value
-    # mc['var95'] is the 5th-percentile return (negative = loss)
-    # Multiplying by -1 makes it a positive loss amount
-    mc_var_pct    = mc["var95"]          # e.g. -0.12 means -12% over 30 days
-    mc_var_dollar = (-1 * mc_var_pct * portfolio_value) if portfolio_value > 0 else None
 
     # ── Monte Carlo Forward Paths (for chart) ───────────────────────
     mc_chart_data = generate_mc_forward_paths(
@@ -419,17 +385,13 @@ def get_risk_metrics(
         # Empirical daily metrics (from historical data)
         "portfolio_expected_return":       port_return,
         "portfolio_volatility":            port_vol,
-        "sharpe_ratio":                    float(sharpe),
         "historical_var_95":               hist_var,
         "parametric_var_95":               float(parametric_var),
         # Monte Carlo 30-day compounded metrics
-        "monte_carlo_var_95":              mc_var_pct,          # % return (alias for risk gauge)
+        "monte_carlo_var_95":              mc["var95"],
         "monte_carlo_expected_return_30d": mc["expected"],
         "monte_carlo_volatility_30d":      mc["volatility"],
-        "monte_carlo_sharpe_30d":          mc["sharpe"],
-        "monte_carlo_var95_30d":           mc_var_pct,          # 30-day % loss at 95% CI
-        "monte_carlo_var95_dollar":        mc_var_dollar,       # ₹ amount (null if no value in CSV)
-        "portfolio_value":                 portfolio_value if portfolio_value > 0 else None,
+        "monte_carlo_var95_30d":           mc["var95"],
         # Meta
         "beta":                            float(beta),
         "correlation_matrix":              corr_matrix.values.tolist(),
@@ -452,7 +414,7 @@ def monte_carlo_simulation(
     weights: np.ndarray,
     simulations: int = 10000,
     horizon_days: int = 30,
-    confidence_level: float = 0.95     # 0.95 → 5th percentile VaR
+    confidence_level: float = 0.95
 ) -> dict:
     """
     Runs a proper multi-day Monte Carlo simulation.
@@ -461,7 +423,7 @@ def monte_carlo_simulation(
             from multivariate_normal(mean, cov).
     Step 2: Compute portfolio daily returns via einsum.
     Step 3: Compound across horizon_days → (simulations,) end-of-period returns.
-    Step 4: Extract expected, volatility, Sharpe, VaR95 from the terminal distribution.
+    Step 4: Extract expected, volatility, VaR95 from the terminal distribution.
 
     No sqrt(T) scaling. No 1-day shortcut. Pure compounding.
     """
@@ -479,18 +441,16 @@ def monte_carlo_simulation(
     # prod(1 + r_t) - 1 over the horizon for each simulation path
     simulated_end_returns = np.prod(1 + portfolio_daily, axis=1) - 1
 
-    # Step 4: Terminal distribution statistics
+    # Step 4: Terminal distribution statistics — all on 30-day horizon
     expected   = float(np.mean(simulated_end_returns))
     volatility = float(np.std(simulated_end_returns))
-    sharpe     = expected / volatility if volatility > 0 else 0.0
-    # VaR at the specified confidence level: e.g. 95% CI → 5th percentile
+    # VaR at the specified confidence level
     var_pct    = (1 - confidence_level) * 100
     var95      = float(np.percentile(simulated_end_returns, var_pct))
 
     return {
         "expected":   expected,
         "volatility": volatility,
-        "sharpe":     sharpe,
         "var95":      var95
     }
 
