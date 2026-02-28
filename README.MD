@@ -109,15 +109,13 @@ User → Frontend → Backend → Risk Engine → (Optional Database) → Respon
 
 ![React FastAPI Architecture](./assets/images/react-fastapi-architecture.png)
 
-![Monte Carlo Flowchart 1](./assets/images/Flowchart-of-the-Monte-Carlo-simulation.png)
-
 ![Monte Carlo Flowchart 2](./assets/images/The-flowchart-of-the-Monte-Carlo-simulation.png)
 
 ---
 
 ## 5. Database Design
 
-*(Note: Minimal database required for hackathon version. Optional for production.)*
+
 
 ### ER Diagram
 
@@ -256,8 +254,6 @@ Multivariate Normal Monte Carlo Simulation for Portfolio Risk
 
 ### API Testing Screenshots
 
-(Add Postman / Thunder Client screenshots here)
-
 ---
 
 ## 10. Module-wise Development & Deliverables
@@ -285,7 +281,7 @@ Multivariate Normal Monte Carlo Simulation for Portfolio Risk
 
 ### Checkpoint 4: Model Training
 
-(Not applicable — statistical model used instead of ML training)
+
 
 ### Checkpoint 5: Model Integration
 
@@ -336,9 +332,9 @@ Multivariate Normal Monte Carlo Simulation for Portfolio Risk
 
 | Member Name | Role                  | Responsibilities                                          |
 | ----------- | --------------------- | --------------------------------------------------------- |
-| Krishna     | Backend & Risk Engine | Statistical modeling, FastAPI, Monte Carlo implementation |
-| Member 2    | Frontend              | UI/UX, dashboard visualization                            |
-| Member 3    | Deployment & Testing  | Integration, API testing, hosting                         |
+| Krishna Verma    | Backend & Risk Engine | Statistical modeling, FastAPI, Monte Carlo implementation |
+| Sambudhha Banerjee    | Frontend              | UI/UX, dashboard visualization                            |
+| Aniruddha Dwivedi    | Core logic and Ideation  | Researching about various possible methods of Portfolio Analysis                         |
 
 ---
 
