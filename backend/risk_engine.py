@@ -56,10 +56,16 @@ def preprocess_portfolio_data(df: pd.DataFrame, benchmark_ticker: str):
     # Forward fill missing asset prices
     df = df.ffill().dropna()
     
-    # 2. Extract Date Range
-    start_date = df.index.min().strftime('%Y-%m-%d')
-    # End date + 1 to ensure the last day is included in yfinance download
-    end_date = (df.index.max() + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    # 2. Extract Date Range (Ensure we get single scalar values)
+    raw_start = df.index.min()
+    raw_end = df.index.max()
+    
+    if pd.isna(raw_start) or pd.isna(raw_end):
+        raise HTTPException(status_code=400, detail="CSV contains invalid or empty dates.")
+        
+    start_date = pd.to_datetime(raw_start).strftime('%Y-%m-%d')
+    # End date + 1 to ensure the last day is captured in yfinance
+    end_date = (pd.to_datetime(raw_end) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
     
     # 3. Calculate Asset Returns
     asset_returns = df.pct_change().dropna()
