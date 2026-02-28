@@ -64,7 +64,7 @@ const MonteCarloChart = ({ data: analysisData }) => {
                     Monte Carlo Simulation
                 </h2>
                 <div className={`text-xs font-mono px-2 py-1 rounded ${isLiveData ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/50' : 'bg-slate-800/50 text-slate-500'}`}>
-                    {isLiveData ? '● 500 REAL PATHS • 31 DAYS' : 'SAMPLE DATA • 31 DAYS'}
+                    {isLiveData ? '● 5,000 REAL PATHS • 31 DAYS' : 'SAMPLE DATA • 31 DAYS'}
                 </div>
             </div>
 

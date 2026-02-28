@@ -172,7 +172,7 @@ def get_risk_metrics(
         weights=weights,
         num_assets=num_assets,
         horizon=31,
-        path_simulations=500  # Lightweight subset for chart
+        path_simulations=5000  # High-fidelity: 5000 paths for accurate percentile bands
     )
     
     # 6. Beta Calculation (Strict Cov/Var Formula)
