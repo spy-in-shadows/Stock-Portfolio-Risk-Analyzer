@@ -5,6 +5,7 @@ import UploadPortfolio from '../components/UploadPortfolio';
 import CorrelationHeatmap from '../components/CorrelationHeatmap';
 import MonteCarloChart from '../components/MonteCarloChart';
 import ScenarioPanel from '../components/ScenarioPanel';
+import RiskGauge from '../components/RiskGauge';
 
 const Dashboard = () => {
     const containerRef = useRef(null);
@@ -37,41 +38,48 @@ const Dashboard = () => {
     return (
         <div ref={containerRef} className="container mx-auto px-4 py-8 max-w-7xl">
             {/* Header */}
-            <header className="header-entry mb-8 flex justify-between items-end border-b border-slate-800 pb-4">
+            <header className="header-entry mb-8 flex flex-col md:flex-row justify-between items-start md:items-end border-b border-slate-800 pb-4 gap-4 md:gap-0">
                 <div>
-                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500 tracking-tight">
+                    <h1 className="text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500 tracking-tight flex items-center gap-3">
                         Risk Analytics Terminal
+                        <span className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.8)]"></span>
+                        </span>
                     </h1>
                     <p className="text-slate-400 mt-1 text-sm">Portfolio Downside Risk and Tail Exposure Measurement</p>
                 </div>
-                <div className="text-xs font-mono text-slate-500 uppercase tracking-wider flex gap-4">
-                    <span>Env: <span className="text-emerald-400">Production</span></span>
-                    <span>Status: <span className="text-emerald-400">Live</span></span>
+                <div className="text-xs font-mono text-slate-500 uppercase tracking-wider flex gap-4 bg-slate-900/50 p-2 rounded-lg border border-slate-800/50">
+                    <span className="smooth-transition hover:text-slate-300 cursor-default">Env: <span className="text-emerald-400">Production</span></span>
+                    <span className="smooth-transition hover:text-slate-300 cursor-default">Status: <span className="text-emerald-400 font-bold">Live</span></span>
                 </div>
             </header>
 
             {/* Main Grid Network */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
 
-                {/* Left Column: Upload & Scenario Panel */}
-                <div className="lg:col-span-3 flex flex-col gap-6">
-                    <div className="gsap-entry">
+                {/* Left Column: Context & Scenarios */}
+                <div className="lg:col-span-3 flex flex-col gap-8">
+                    <div className="gsap-entry h-48">
                         <UploadPortfolio />
                     </div>
-                    <div className="gsap-entry flex-grow">
+                    <div className="gsap-entry h-[22rem]">
+                        <RiskGauge />
+                    </div>
+                    <div className="gsap-entry flex-grow lg:min-h-[24rem]">
                         <ScenarioPanel />
                     </div>
                 </div>
 
                 {/* Right Column: Main Data View */}
-                <div className="lg:col-span-9 flex flex-col gap-6">
+                <div className="lg:col-span-9 flex flex-col gap-8">
                     {/* Top: Risk Metrics */}
                     <div className="gsap-entry">
                         <RiskMetrics />
                     </div>
 
-          /* Middle/Bottom: Charts Grid */
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-grow">
+                    {/* Middle/Bottom: Charts Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 flex-grow">
                         <div className="gsap-entry">
                             <MonteCarloChart />
                         </div>
