@@ -364,7 +364,8 @@ def get_risk_metrics(
         cov=cov_matrix.values,
         weights=weights,
         simulations=simulations,
-        horizon_days=30
+        horizon_days=30,
+        confidence_level=confidence_level    # propagate caller's CI (default 0.95)
     )
 
     # ── Monte Carlo Forward Paths (for chart) ───────────────────────
@@ -417,7 +418,8 @@ def monte_carlo_simulation(
     cov: np.ndarray,
     weights: np.ndarray,
     simulations: int = 10000,
-    horizon_days: int = 30
+    horizon_days: int = 30,
+    confidence_level: float = 0.95     # 0.95 → 5th percentile VaR
 ) -> dict:
     """
     Runs a proper multi-day Monte Carlo simulation.
@@ -448,7 +450,9 @@ def monte_carlo_simulation(
     expected   = float(np.mean(simulated_end_returns))
     volatility = float(np.std(simulated_end_returns))
     sharpe     = expected / volatility if volatility > 0 else 0.0
-    var95      = float(np.percentile(simulated_end_returns, 5))
+    # VaR at the specified confidence level: e.g. 95% CI → 5th percentile
+    var_pct    = (1 - confidence_level) * 100
+    var95      = float(np.percentile(simulated_end_returns, var_pct))
 
     return {
         "expected":   expected,
