@@ -488,6 +488,14 @@ def generate_mc_forward_paths(
     cum_factors = np.cumprod(np.hstack([ones_col, 1 + portfolio_daily]), axis=1)
     cumulative  = cum_factors * 100.0    # Base portfolio value = 100
 
+    # Select 3 consistent paths based on their final values at day = horizon
+    end_vals = cumulative[:, horizon]
+    p10_end, p50_end, p90_end = np.percentile(end_vals, [10, 50, 90])
+    
+    idx_50 = int(np.argmin(np.abs(end_vals - p50_end)))  # Median path
+    idx_10 = int(np.argmin(np.abs(end_vals - p10_end)))  # Stress path (P10)
+    idx_90 = int(np.argmin(np.abs(end_vals - p90_end)))  # Bull path (P90)
+
     result = []
     for t in range(horizon + 1):
         day_vals = cumulative[:, t]             # shape (path_simulations,)
@@ -495,9 +503,9 @@ def generate_mc_forward_paths(
 
         result.append({
             "day":    t,
-            "path1": round(float(day_vals[int(np.argmin(np.abs(day_vals - p50)))]), 4),  # Median path
-            "path2": round(float(day_vals[int(np.argmin(np.abs(day_vals - p10)))]), 4),  # Stress (P10)
-            "path3": round(float(day_vals[int(np.argmin(np.abs(day_vals - p90)))]), 4),  # Bull   (P90)
+            "path1": round(float(cumulative[idx_50, t]), 4),  # True consistent median path
+            "path2": round(float(cumulative[idx_10, t]), 4),  # True consistent stress path
+            "path3": round(float(cumulative[idx_90, t]), 4),  # True consistent bull path
             "median": round(float(p50), 4),
             "var95":  round(float(p5), 4),
             "confidenceBand": [round(float(p10), 4), round(float(p90), 4)]
