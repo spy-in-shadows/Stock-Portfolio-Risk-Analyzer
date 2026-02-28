@@ -163,40 +163,17 @@ def get_risk_metrics(
     sim_asset_returns = mean_returns.values + np.dot(Z, L.T)
     port_sim_returns = np.dot(sim_asset_returns, weights)
     mc_var = np.percentile(port_sim_returns, (1 - confidence_level) * 100)
-
-    # 6. Multi-day Simulation Paths (30-day horizon)
-    # Simulate full time-series paths using Cholesky GBM
-    # Each path: cumulative portfolio value starting at 100
-    horizon = 30
-    # Shape: (simulations, horizon, num_assets)
-    # Generate all daily shocks at once — fully vectorized
-    Z_multi = np.random.standard_normal((simulations, horizon, num_assets))
-    # Apply Cholesky: correlated daily shocks
-    # daily_asset_returns shape: (simulations, horizon, num_assets)
-    daily_asset_returns = mean_returns.values + np.einsum('ijk,lk->ijl', Z_multi, L)
-    # Portfolio daily returns: (simulations, horizon)
-    daily_port_returns = np.dot(daily_asset_returns, weights)
-    # Prepend day 0 (value = 100)
-    start_col = np.ones((simulations, 1))
-    # Cumulative product of (1 + r) across days
-    cumulative_returns = np.cumprod(1 + daily_port_returns, axis=1)
-    # Multiply by initial value of 100, prepend day 0
-    portfolio_values = np.hstack([np.ones((simulations, 1)) * 100, 100 * cumulative_returns])
     
-    # Compute percentile bands per day (shape: 5 x 31)
-    percentiles = np.percentile(portfolio_values, [5, 25, 50, 75, 95], axis=0)
-    
-    simulation_paths = [
-        {
-            "day": int(t),
-            "p5":  round(float(percentiles[0, t]), 4),
-            "p25": round(float(percentiles[1, t]), 4),
-            "p50": round(float(percentiles[2, t]), 4),
-            "p75": round(float(percentiles[3, t]), 4),
-            "p95": round(float(percentiles[4, t]), 4),
-        }
-        for t in range(horizon + 1)
-    ]
+    # 7. Real Forward Path Simulation (for chart visualization)
+    # Generates T-day cumulative GBM paths using the same Cholesky matrix
+    mc_chart_data = generate_mc_forward_paths(
+        mean_returns=mean_returns,
+        L=L,
+        weights=weights,
+        num_assets=num_assets,
+        horizon=31,
+        path_simulations=500  # Lightweight subset for chart
+    )
     
     # 6. Beta Calculation (Strict Cov/Var Formula)
     # Beta = Cov(Rp, Rm) / Var(Rm)
@@ -218,5 +195,70 @@ def get_risk_metrics(
         "correlation_matrix": corr_matrix.values.tolist(),
         "asset_names": asset_names,
         "benchmark_ticker": benchmark_ticker,
-        "simulation_paths": simulation_paths
+        "mc_chart_data": mc_chart_data
     }
+
+
+def generate_mc_forward_paths(
+    mean_returns: pd.Series,
+    L: np.ndarray,
+    weights: np.ndarray,
+    num_assets: int,
+    horizon: int = 31,
+    path_simulations: int = 500
+) -> list:
+    """
+    Generates T-day forward cumulative portfolio value paths using
+    multi-step Geometric Brownian Motion with Cholesky-correlated shocks.
+    Returns a list of dicts (one per day) for direct chart consumption.
+    """
+    # Shape: (horizon, path_simulations, num_assets)
+    # Each day: draw fresh correlated Gaussian shocks
+    Z_all = np.random.standard_normal((horizon, path_simulations, num_assets))
+    
+    # Daily correlated returns: shape (horizon, path_simulations)
+    # For each day: sim_daily_asset_returns = mu + Z @ L.T
+    daily_asset_returns = mean_returns.values + np.tensordot(Z_all, L.T, axes=([2], [0]))
+    # daily_asset_returns shape: (horizon, path_simulations, num_assets)
+    
+    # Portfolio daily returns: shape (horizon, path_simulations)
+    daily_port_returns = np.dot(daily_asset_returns, weights)
+    
+    # Cumulative product: start at 100, compound day by day
+    # Shape: (horizon+1, path_simulations) — index 0 = start value 100
+    cumulative = np.vstack([
+        np.full((1, path_simulations), 100.0),
+        np.cumprod(1 + daily_port_returns, axis=0) * 100
+    ])
+    # cumulative shape: (horizon+1, path_simulations)
+    
+    # Build output: one record per day
+    result = []
+    for t in range(horizon + 1):
+        day_values = cumulative[t]  # shape: (path_simulations,)
+        
+        # Pick 3 representative paths by percentile rank
+        # Path 1: near-median (50th)
+        # Path 2: stress / bear (10th)
+        # Path 3: bull (90th)
+        p10, p25, p50, p75, p90 = np.percentile(day_values, [10, 25, 50, 75, 90])
+        
+        # Find actual simulation paths closest to those percentiles
+        idx_median = int(np.argmin(np.abs(day_values - p50)))
+        idx_stress = int(np.argmin(np.abs(day_values - p10)))
+        idx_bull   = int(np.argmin(np.abs(day_values - p90)))
+        
+        result.append({
+            "day": t,
+            "path1": round(float(day_values[idx_median]), 4),   # Median path
+            "path2": round(float(day_values[idx_stress]), 4),   # Stress (10th pct)
+            "path3": round(float(day_values[idx_bull]),   4),   # Bull   (90th pct)
+            "median": round(float(p50), 4),
+            "var95":  round(float(np.percentile(day_values, 5)), 4),
+            "confidenceBand": [
+                round(float(p10), 4),
+                round(float(p90), 4)
+            ]
+        })
+    
+    return result
