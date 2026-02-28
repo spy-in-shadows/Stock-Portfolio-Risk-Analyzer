@@ -55,7 +55,7 @@ const Dashboard = () => {
                     <p className="text-slate-400 mt-1 text-sm">Portfolio Downside Risk and Tail Exposure Measurement</p>
                 </div>
                 <div className="text-xs font-mono text-slate-500 uppercase tracking-wider flex gap-4 bg-slate-900/50 p-2 rounded-lg border border-slate-800/50">
-                    <span className="smooth-transition hover:text-slate-300 cursor-default">Env: <span className="text-emerald-400">Production</span></span>
+                    <span className="smooth-transition hover:text-slate-300 cursor-default">Environment: <span className="text-emerald-400">Production</span></span>
                     <span className="smooth-transition hover:text-slate-300 cursor-default">Status: <span className="text-emerald-400 font-bold">Live</span></span>
                 </div>
             </header>

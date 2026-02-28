@@ -105,7 +105,7 @@ const CorrelationHeatmap = ({ matrix, assets }) => {
                     style={{ bottom: '10px', right: '10px' }}>
                     <p className="text-[10px] text-slate-400 mb-1 tracking-wider uppercase">Linear Dependency</p>
                     <p className="text-sm font-bold text-slate-200">
-                        {displayAssets[hoveredCell.i]} <span className="text-slate-500 font-normal mx-1">vs</span> {displayAssets[hoveredCell.j]}
+                        {displayAssets[hoveredCell.i]} <span className="text-slate-500 font-normal mx-1">versus</span> {displayAssets[hoveredCell.j]}
                     </p>
                     <p className={`text-xs mt-1 font-mono ${hoveredCell.val > 0.5 ? 'text-[#00C040]' : hoveredCell.val < -0.3 ? 'text-[#FF0000]' : 'text-slate-400'}`}>
                         Correlation: {hoveredCell.val.toFixed(2)}
