@@ -23,8 +23,8 @@ const AnimatedNumber = ({ value, format = 'number' }) => {
 
                 // Format back to string
                 let formatted = '';
-                if (format === 'currencyM') formatted = `₹${current.toFixed(1)}M`;
-                else if (format === 'currencyK') formatted = `₹${Math.round(current)}K`;
+                if (format === 'currencyM') formatted = `₹${current.toFixed(1)} Million`;
+                else if (format === 'currencyK') formatted = `₹${Math.round(current)} Thousand`;
                 else if (format === 'percentage') formatted = `${current.toFixed(1)}%`;
                 else formatted = current.toFixed(2);
 
@@ -68,7 +68,7 @@ const RiskMetrics = ({ data }) => {
                 { label: 'Monte Carlo VaR', value: '0.0', format: 'percentage', sub: '95% Confidence', icon: <ShieldAlert size={16} />, color: 'text-rose-400', bg: 'bg-rose-500/10', gradient: 'from-rose-500 to-red-500', trend: 'flat', primary: true },
                 { label: 'Portfolio Vol', value: '0.0', format: 'percentage', sub: 'Daily std dev', icon: <Activity size={16} />, color: 'text-amber-400', bg: 'bg-amber-500/10', gradient: 'from-amber-500 to-orange-500', trend: 'flat', primary: false },
                 { label: 'Sharpe Ratio', value: '0.0', format: 'number', sub: 'Risk-adjusted', icon: <TrendingDown size={16} />, color: 'text-emerald-400', bg: 'bg-emerald-500/10', gradient: 'from-emerald-500 to-teal-500', trend: 'flat', primary: false },
-                { label: 'Portfolio Beta', value: '0.0', format: 'number', sub: 'vs Benchmark', icon: <Zap size={16} />, color: 'text-cyan-400', bg: 'bg-cyan-500/10', gradient: 'from-cyan-500 to-blue-500', trend: 'flat', primary: false },
+                { label: 'Portfolio Beta', value: '0.0', format: 'number', sub: 'versus Benchmark', icon: <Zap size={16} />, color: 'text-cyan-400', bg: 'bg-cyan-500/10', gradient: 'from-cyan-500 to-blue-500', trend: 'flat', primary: false },
             ];
         }
 
@@ -113,7 +113,7 @@ const RiskMetrics = ({ data }) => {
                 label: 'Portfolio Beta',
                 value: data.beta.toFixed(2),
                 format: 'number',
-                sub: 'vs Benchmark',
+                sub: 'versus Benchmark',
                 icon: <Zap size={16} />,
                 color: 'text-cyan-400', bg: 'bg-cyan-500/10', gradient: 'from-cyan-500 to-blue-500',
                 trend: data.beta > 1 ? 'up' : 'down', primary: false
