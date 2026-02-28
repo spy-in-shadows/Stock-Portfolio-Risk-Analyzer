@@ -7,45 +7,43 @@ import gsap from 'gsap';
 const AnimatedNumber = ({ value, format = 'number' }) => {
     const elRef = useRef(null);
     const objRef = useRef({ val: 0 });
+    const tweenRef = useRef(null);
 
     useEffect(() => {
-        // Parse numeric portion (strip ₹, commas, letters)
-        let target = parseFloat(String(value).replace(/[^0-9.]/g, ''));
+        // Correctly parse signed numbers like '-0.06' or '1.23'
+        const raw = String(value).replace(/[^0-9.\-]/g, '');  // keep minus sign
+        let target = parseFloat(raw);
         if (isNaN(target)) target = 0;
 
-        gsap.to(objRef.current, {
+        // Kill any in-progress tween before starting a new one
+        if (tweenRef.current) tweenRef.current.kill();
+
+        tweenRef.current = gsap.to(objRef.current, {
             val: target,
-            duration: 1.5,
+            duration: 1.2,
             ease: 'power3.out',
             onUpdate: () => {
-                let current = objRef.current.val;
+                const current = objRef.current.val;
                 if (!elRef.current) return;
 
                 let formatted = '';
-                if (format === 'currencyC') formatted = `₹${current.toFixed(2)} Cr`;
-                else if (format === 'currencyL') formatted = `₹${current.toFixed(2)} L`;
-                else if (format === 'currencyK') formatted = `₹${Math.round(current)} K`;
-                else if (format === 'currencyM') formatted = `₹${current.toFixed(1)} M`;
-                else if (format === 'percentage') formatted = `${current.toFixed(2)}%`;
-                else formatted = current.toFixed(2);
+                if (format === 'currencyM') formatted = `₹${current.toFixed(1)}M`;
+                else if (format === 'currencyK') formatted = `₹${Math.round(current)}K`;
+                else if (format === 'percentage') {
+                    // Use 2dp so small values like 0.06% don't round to 0.0%
+                    formatted = `${current.toFixed(2)}%`;
+                } else {
+                    formatted = current.toFixed(2);
+                }
 
                 elRef.current.innerText = formatted;
             }
         });
+
+        return () => { if (tweenRef.current) tweenRef.current.kill(); };
     }, [value, format]);
 
     return <span ref={elRef}>0</span>;
-};
-
-// Pick best Indian currency unit for a raw ₹ amount
-const formatRupeeValue = (amount) => {
-    const cr = amount / 1e7;   // crores
-    const lk = amount / 1e5;   // lakhs
-    const th = amount / 1e3;   // thousands
-    if (cr >= 1) return { value: cr.toFixed(2), format: 'currencyC' };
-    if (lk >= 1) return { value: lk.toFixed(2), format: 'currencyL' };
-    if (th >= 1) return { value: th.toFixed(2), format: 'currencyK' };
-    return { value: amount.toFixed(2), format: 'number' };
 };
 
 // Generate dummy sparkline data
@@ -87,42 +85,23 @@ const RiskMetrics = ({ data }) => {
         return [
             {
                 label: 'Expt Return',
-                value: (data.portfolio_expected_return * 100).toFixed(2),
+                // Use 4dp so daily values like 0.065% don't round to 0.00%
+                value: (data.portfolio_expected_return * 100).toFixed(4),
                 format: 'percentage',
-                sub: 'Historical Mean',
+                sub: 'Daily · Historical',
                 icon: <Target size={16} />,
                 color: 'text-indigo-400', bg: 'bg-indigo-500/10', gradient: 'from-indigo-500 to-blue-500',
                 trend: data.portfolio_expected_return > 0 ? 'up' : 'down', primary: true
             },
-            (() => {
-                const dollarVaR = data.monte_carlo_var95_dollar;
-                const pctVaR = Math.abs(data.monte_carlo_var95_30d ?? data.monte_carlo_var_95);
-
-                if (dollarVaR != null && dollarVaR > 0) {
-                    // Show as ₹ amount using best Indian unit
-                    const { value, format } = formatRupeeValue(dollarVaR);
-                    return {
-                        label: 'MC VaR (30D)',
-                        value,
-                        format,
-                        sub: '30-Day · 95% CI · Max Loss ₹',
-                        icon: <ShieldAlert size={16} />,
-                        color: 'text-rose-400', bg: 'bg-rose-500/10', gradient: 'from-rose-500 to-red-500',
-                        trend: 'down', primary: true
-                    };
-                }
-                // Fallback: show as percentage
-                return {
-                    label: 'MC VaR (30D)',
-                    value: (pctVaR * 100).toFixed(2),
-                    format: 'percentage',
-                    sub: '30-Day · 95% CI',
-                    icon: <ShieldAlert size={16} />,
-                    color: 'text-rose-400', bg: 'bg-rose-500/10', gradient: 'from-rose-500 to-red-500',
-                    trend: 'down', primary: true
-                };
-            })(),
-
+            {
+                label: 'MC VaR (30D)',
+                value: (Math.abs(data.monte_carlo_var95_30d ?? data.monte_carlo_var_95) * 100).toFixed(2),
+                format: 'percentage',
+                sub: '30-Day · 95% CI',
+                icon: <ShieldAlert size={16} />,
+                color: 'text-rose-400', bg: 'bg-rose-500/10', gradient: 'from-rose-500 to-red-500',
+                trend: 'down', primary: true
+            },
             {
                 label: 'Portfolio Vol',
                 value: (data.portfolio_volatility * 100).toFixed(2),
