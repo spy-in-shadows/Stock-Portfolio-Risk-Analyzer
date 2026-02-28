@@ -77,69 +77,16 @@ def parse_holdings_csv(df: pd.DataFrame) -> Tuple[List[str], List[float]]:
 # Fetches adjusted close prices for a list of tickers via yfinance.
 # ═══════════════════════════════════════════════════════════════════
 
-def _resolve_tickers(tickers: List[str], start_date: str, end_date: str) -> dict:
+def _build_yf_ticker(ticker: str) -> str:
     """
-    Resolves ticker symbols to their correct Yahoo Finance format.
-    For each ticker that doesn't return data, tries appending .NS (NSE) then .BO (BSE).
-    Returns: dict mapping original_ticker → resolved_ticker
+    Maps a bare ticker symbol to its Yahoo Finance equivalent.
+    - Already has '.' or starts with '^' → use as-is
+    - Otherwise → append '.NS' (NSE India default)
+    Zero API calls — pure string logic.
     """
-    resolution_map = {}
-    unresolved = []
-
-    for ticker in tickers:
-        # Already has an exchange suffix — use as-is
-        if '.' in ticker or ticker.startswith('^'):
-            resolution_map[ticker] = ticker
-            continue
-        unresolved.append(ticker)
-
-    if not unresolved:
-        return resolution_map
-
-    # Try all unresolved tickers in batch first (as-is)
-    if unresolved:
-        test_df = yf.download(unresolved, start=start_date, end=end_date,
-                              progress=False, auto_adjust=True)
-        if test_df is not None and not test_df.empty:
-            if isinstance(test_df.columns, pd.MultiIndex):
-                fetched_cols = set(test_df.columns.get_level_values(1))
-            else:
-                fetched_cols = set(unresolved)
-
-            resolved_now = [t for t in unresolved if t in fetched_cols]
-            still_missing = [t for t in unresolved if t not in fetched_cols]
-
-            for t in resolved_now:
-                resolution_map[t] = t
-            unresolved = still_missing
-
-    # For anything still unresolved, try .NS then .BO individually
-    for ticker in unresolved:
-        resolved = None
-        for suffix in ['.NS', '.BO']:
-            candidate = ticker + suffix
-            try:
-                test = yf.download(candidate, start=start_date, end=end_date,
-                                   progress=False, auto_adjust=True)
-                if test is not None and not test.empty:
-                    resolved = candidate
-                    break
-            except Exception:
-                continue
-        if resolved:
-            resolution_map[ticker] = resolved
-        else:
-            # Cannot resolve — raise with helpful message
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Could not resolve ticker '{ticker}' on Yahoo Finance. "
-                    f"Tried: {ticker}, {ticker}.NS, {ticker}.BO. "
-                    "Use the full Yahoo Finance ticker symbol (e.g., RELIANCE.NS, TCS.NS)."
-                )
-            )
-
-    return resolution_map
+    if '.' in ticker or ticker.startswith('^'):
+        return ticker
+    return ticker + '.NS'
 
 
 def fetch_price_history(
@@ -148,23 +95,24 @@ def fetch_price_history(
     end_date: str
 ) -> tuple:
     """
-    Fetches historical adjusted close prices for all tickers.
-    Automatically resolves exchange suffixes (.NS / .BO) if missing.
-    Returns: (price_df, resolved_ticker_map)
-      - price_df: DatetimeIndex × OriginalTickers (columns)
-      - resolved_map: {original_ticker: resolved_ticker}
-    Requires at least 60 valid trading days after alignment.
+    Fetches historical adjusted close prices for all tickers in ONE batch call.
+    Auto-appends .NS suffix for bare Indian tickers (no probe calls).
+    Returns: (price_df, resolved_map)
+      - price_df: DatetimeIndex × original_ticker columns
+      - resolved_map: {original_ticker: yf_ticker}
     """
-    # Step 1: Resolve all tickers to valid Yahoo Finance symbols
-    resolved_map = _resolve_tickers(tickers, start_date, end_date)
-    resolved_tickers = [resolved_map[t] for t in tickers]
+    # Step 1: Build YF ticker list (zero API calls)
+    resolved_map = {t: _build_yf_ticker(t) for t in tickers}
+    yf_tickers   = [resolved_map[t] for t in tickers]
 
-    # Step 2: Fetch all resolved tickers together with retry
-    max_retries = 3
+    # Step 2: Single batch download with retry
+    max_retries = 4
     df = None
     for attempt in range(max_retries):
+        if attempt > 0:
+            time.sleep(2 ** (attempt - 1))   # 1s, 2s, 4s gaps
         df = yf.download(
-            resolved_tickers,
+            yf_tickers,
             start=start_date,
             end=end_date,
             progress=False,
@@ -172,68 +120,68 @@ def fetch_price_history(
         )
         if df is not None and not df.empty:
             break
-        wait = 2 ** attempt
-        time.sleep(wait)
 
     if df is None or df.empty:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Failed to fetch historical data even after ticker resolution. "
-                "Yahoo Finance may be rate-limiting. Wait a moment and retry."
+                f"Could not fetch market data for: {yf_tickers}. "
+                "Yahoo Finance may be rate-limiting. Please wait ~30 seconds and retry."
             )
         )
 
-    # Step 3: Extract price columns (handle MultiIndex from yfinance 0.2.x)
+    # Step 3: Extract price column (handle yfinance 0.2.x MultiIndex)
     if isinstance(df.columns, pd.MultiIndex):
         level0 = df.columns.get_level_values(0)
-        if 'Close' in level0:
-            price_df = df['Close']
-        elif 'Adj Close' in level0:
-            price_df = df['Adj Close']
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No price column found in response. Available: {list(level0.unique())}"
-            )
+        price_df = df['Close'] if 'Close' in level0 else df['Adj Close']
     else:
-        if 'Close' in df.columns:
-            price_df = df[['Close']]
-        elif 'Adj Close' in df.columns:
-            price_df = df[['Adj Close']]
-        else:
-            raise HTTPException(status_code=400, detail="No price column found in downloaded data.")
+        price_df = df[['Close']] if 'Close' in df.columns else df[['Adj Close']]
 
     if isinstance(price_df, pd.Series):
-        price_df = price_df.to_frame(name=resolved_tickers[0])
+        price_df = price_df.to_frame(name=yf_tickers[0])
 
-    # Step 4: Rename columns back to original tickers for consistency
+    # Step 4: Rename columns from YF tickers back to original names
     reverse_map = {v: k for k, v in resolved_map.items()}
     price_df.columns = [reverse_map.get(str(c).strip(), str(c).strip()) for c in price_df.columns]
 
-    # Step 5: Reorder to match original tickers list order
-    available = [t for t in tickers if t in price_df.columns]
+    # Step 5: Select and reorder to match original tickers order
     missing = [t for t in tickers if t not in price_df.columns]
     if missing:
         raise HTTPException(
             status_code=400,
-            detail=f"Price data not available for: {missing}. Try adding exchange suffix (.NS / .BO)."
+            detail=(
+                f"No price data returned for: {missing} "
+                f"(tried as: {[resolved_map[t] for t in missing]}). "
+                "Check that the ticker exists on Yahoo Finance."
+            )
         )
-    price_df = price_df[available]
+    price_df = price_df[tickers]
 
-    # Step 6: Forward-fill gaps and validate minimum data
+    # Step 6: Guard against all-NaN columns (silent rate-limit response)
+    all_nan_cols = [c for c in price_df.columns if price_df[c].isna().all()]
+    if all_nan_cols:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Received empty data for: {all_nan_cols}. "
+                "Yahoo Finance may be rate-limiting. Wait ~30 seconds and retry."
+            )
+        )
+
+    # Step 7: Forward-fill small holiday gaps then drop residual NaNs
     price_df = price_df.ffill().dropna()
 
     if len(price_df) < 60:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Only {len(price_df)} valid trading days found. "
-                "Minimum 60 required. Increase history_days or check ticker availability."
+                f"Only {len(price_df)} aligned trading days. "
+                "Minimum 60 required. Try increasing history_days."
             )
         )
 
     return price_df, resolved_map
+
 
 
 
