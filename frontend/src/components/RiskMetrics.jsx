@@ -77,7 +77,7 @@ const RiskMetrics = ({ data }) => {
                 { label: 'Expt Return', value: '0.0', format: 'number', sub: 'Historical mean', icon: <Target size={16} />, color: 'text-indigo-400', bg: 'bg-indigo-500/10', gradient: 'from-indigo-500 to-blue-500', trend: 'flat', primary: true },
                 { label: 'Monte Carlo VaR', value: '0.0', format: 'percentage', sub: '95% Confidence', icon: <ShieldAlert size={16} />, color: 'text-rose-400', bg: 'bg-rose-500/10', gradient: 'from-rose-500 to-red-500', trend: 'flat', primary: true },
                 { label: 'Portfolio Vol', value: '0.0', format: 'percentage', sub: 'Daily std dev', icon: <Activity size={16} />, color: 'text-amber-400', bg: 'bg-amber-500/10', gradient: 'from-amber-500 to-orange-500', trend: 'flat', primary: false },
-                { label: 'Sharpe Ratio', value: '0.0', format: 'number', sub: 'Risk-adjusted', icon: <TrendingDown size={16} />, color: 'text-emerald-400', bg: 'bg-emerald-500/10', gradient: 'from-emerald-500 to-teal-500', trend: 'flat', primary: false },
+                { label: 'Historical VaR', value: '0.0', format: 'percentage', sub: '95% · Daily', icon: <TrendingDown size={16} />, color: 'text-emerald-400', bg: 'bg-emerald-500/10', gradient: 'from-emerald-500 to-teal-500', trend: 'flat', primary: false },
                 { label: 'Portfolio Beta', value: '0.0', format: 'number', sub: 'versus Benchmark', icon: <Zap size={16} />, color: 'text-cyan-400', bg: 'bg-cyan-500/10', gradient: 'from-cyan-500 to-blue-500', trend: 'flat', primary: false },
             ];
         }
@@ -112,13 +112,13 @@ const RiskMetrics = ({ data }) => {
                 trend: 'flat', primary: false
             },
             {
-                label: 'Sharpe Ratio',
-                value: data.sharpe_ratio.toFixed(2),
-                format: 'number',
-                sub: `RF: 0.0%`,
+                label: 'Historical VaR',
+                value: (Math.abs(data.historical_var_95) * 100).toFixed(2),
+                format: 'percentage',
+                sub: '95% · Daily',
                 icon: <TrendingDown size={16} />,
                 color: 'text-emerald-400', bg: 'bg-emerald-500/10', gradient: 'from-emerald-500 to-teal-500',
-                trend: data.sharpe_ratio > 1 ? 'up' : 'flat', primary: false
+                trend: 'down', primary: false
             },
             {
                 label: 'Portfolio Beta',

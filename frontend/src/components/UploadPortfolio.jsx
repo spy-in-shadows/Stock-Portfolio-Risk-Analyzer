@@ -1,18 +1,37 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { UploadCloud, CheckCircle2, FileSpreadsheet, Globe } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { UploadCloud, Globe, Layers, Plus, X } from 'lucide-react';
 
 const UploadPortfolio = ({ onUploadSuccess }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [ticker, setTicker] = useState('^NSEI'); // Default to Nifty 50
+    const [ticker, setTicker] = useState('^NSEI');
+    const [blendedEnabled, setBlendedEnabled] = useState(true);
+    const [blendedTickers, setBlendedTickers] = useState([
+        { ticker: '^NSEI', weight: '70' },
+        { ticker: '^NSEMDCP50', weight: '30' },
+    ]);
     const fileInputRef = useRef(null);
+
+    const addBlendedRow = () => {
+        setBlendedTickers(prev => [...prev, { ticker: '', weight: '' }]);
+    };
+
+    const removeBlendedRow = (idx) => {
+        setBlendedTickers(prev => prev.filter((_, i) => i !== idx));
+    };
+
+    const updateBlendedRow = (idx, field, value) => {
+        setBlendedTickers(prev => prev.map((row, i) =>
+            i === idx ? { ...row, [field]: field === 'ticker' ? value.toUpperCase() : value } : row
+        ));
+    };
 
     const handleFileChange = async (event) => {
         const file = event.target.files[0];
         if (!file) return;
 
-        if (!ticker) {
-            setError("Please enter a benchmark ticker first.");
+        if (!ticker && !blendedEnabled) {
+            setError("Please enter a benchmark ticker or enable blended benchmark.");
             return;
         }
 
@@ -21,11 +40,32 @@ const UploadPortfolio = ({ onUploadSuccess }) => {
 
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('benchmark_ticker', ticker);
+
+        // Single benchmark
+        if (ticker) {
+            formData.append('benchmark_ticker', ticker);
+        }
+
+        // Blended benchmark
+        if (blendedEnabled && blendedTickers.length >= 2) {
+            const validRows = blendedTickers.filter(r => r.ticker && r.weight);
+            if (validRows.length >= 2) {
+                const blendedPayload = {
+                    tickers: validRows.map(r => r.ticker),
+                    weights: validRows.map(r => parseFloat(r.weight) / 100),
+                };
+                formData.append('blended_benchmark', JSON.stringify(blendedPayload));
+            }
+        }
 
         // Default parameters
         formData.append('confidence_level', '0.95');
         formData.append('simulations', '5000');
+
+        // Debug: log what we're sending
+        for (const [key, value] of formData.entries()) {
+            console.log(`[Upload] ${key}:`, value instanceof File ? value.name : value);
+        }
 
         try {
             const response = await fetch('http://localhost:8000/analyze', {
@@ -58,8 +98,8 @@ const UploadPortfolio = ({ onUploadSuccess }) => {
         <div className="glass-panel rounded-xl p-5 h-full flex flex-col relative overflow-hidden group">
             <h2 className="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider relative z-10">Risk Analytics Configuration</h2>
 
-            {/* Benchmark Selection */}
-            <div className="mb-4 relative z-10">
+            {/* Single Benchmark */}
+            <div className="mb-3 relative z-10">
                 <label className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-1.5 block">Market Benchmark</label>
                 <div className="relative">
                     <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
@@ -74,6 +114,68 @@ const UploadPortfolio = ({ onUploadSuccess }) => {
                     />
                 </div>
             </div>
+
+            {/* Blended Benchmark Toggle */}
+            <div className="mb-3 relative z-10">
+                <button
+                    type="button"
+                    onClick={() => setBlendedEnabled(!blendedEnabled)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${blendedEnabled
+                        ? 'bg-violet-900/30 border-violet-500/40 text-violet-300'
+                        : 'bg-slate-900/40 border-slate-700/40 text-slate-500 hover:border-violet-500/30 hover:text-violet-400'
+                        }`}
+                >
+                    <Layers size={12} />
+                    Blended Benchmark {blendedEnabled ? '● ON' : '○ OFF'}
+                </button>
+            </div>
+
+            {/* Blended Benchmark Inputs */}
+            {blendedEnabled && (
+                <div className="mb-3 relative z-10 bg-slate-900/40 rounded-lg p-3 border border-violet-800/30 space-y-2">
+                    <div className="flex justify-between items-center mb-1">
+                        <span className="text-[9px] text-violet-400 uppercase font-bold tracking-widest">Blended Components</span>
+                        <span className="text-[9px] text-slate-500 font-mono">Weights must sum to 100%</span>
+                    </div>
+                    {blendedTickers.map((row, idx) => (
+                        <div key={idx} className="flex gap-2 items-center">
+                            <input
+                                type="text"
+                                value={row.ticker}
+                                onChange={(e) => updateBlendedRow(idx, 'ticker', e.target.value)}
+                                placeholder="Ticker"
+                                className="flex-1 bg-slate-800/60 border border-slate-700/40 rounded py-1.5 px-2.5 text-[11px] font-mono text-slate-200 focus:outline-none focus:border-violet-500/50"
+                            />
+                            <div className="relative w-20">
+                                <input
+                                    type="number"
+                                    value={row.weight}
+                                    onChange={(e) => updateBlendedRow(idx, 'weight', e.target.value)}
+                                    placeholder="Wt%"
+                                    min="0"
+                                    max="100"
+                                    className="w-full bg-slate-800/60 border border-slate-700/40 rounded py-1.5 px-2.5 pr-6 text-[11px] font-mono text-slate-200 focus:outline-none focus:border-violet-500/50"
+                                />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">%</span>
+                            </div>
+                            {blendedTickers.length > 2 && (
+                                <button
+                                    onClick={() => removeBlendedRow(idx)}
+                                    className="p-1 rounded hover:bg-rose-900/30 text-slate-600 hover:text-rose-400 transition-colors"
+                                >
+                                    <X size={12} />
+                                </button>
+                            )}
+                        </div>
+                    ))}
+                    <button
+                        onClick={addBlendedRow}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded border border-dashed border-slate-700/40 text-[10px] text-slate-500 hover:text-violet-400 hover:border-violet-500/40 transition-all font-bold uppercase tracking-wider"
+                    >
+                        <Plus size={10} /> Add Ticker
+                    </button>
+                </div>
+            )}
 
             <input
                 type="file"

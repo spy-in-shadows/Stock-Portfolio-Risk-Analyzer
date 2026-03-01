@@ -22,7 +22,7 @@ const MonteCarloChart = ({ data: analysisData }) => {
                     path2: 100 * Math.exp(drift + diffusion * (Math.random() * 2.5 - 1.8)),
                     path3: 100 * Math.exp(drift + diffusion * (Math.random() * 2.5 - 0.7)),
                     mean: 100 * Math.exp(mu * i),
-                    median: 100 * Math.exp(drift * i),
+                    median: 100 * Math.exp(drift),
                     var95: 100 * Math.exp(drift - 1.645 * diffusion),
                     confidenceBand: [
                         100 * Math.exp(drift - 1.645 * diffusion),
