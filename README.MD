@@ -1,3 +1,7 @@
+Deployed link - https://stock-portfolio-risk-analyzer-fqnb.vercel.app/
+
+Google Drive link - https://drive.google.com/drive/folders/1C63yAESvR9UWoRjQlnKN0ehKUZBYVcVC?usp=sharing
+
 # Stock Portfolio Risk Analyzer
 
 A professional-grade web application that enables retail investors to analyze portfolio risk using statistical finance models including Monte Carlo Value at Risk (VaR), Sharpe Ratio, beta, and correlation analysis.
