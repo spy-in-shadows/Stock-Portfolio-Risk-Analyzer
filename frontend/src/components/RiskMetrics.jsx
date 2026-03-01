@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { Zap, ShieldAlert, TrendingDown, Target, Activity } from 'lucide-react';
+import { Zap, ShieldAlert, Target, Activity, TrendingDown } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import gsap from 'gsap';
 
@@ -113,7 +113,7 @@ const RiskMetrics = ({ data }) => {
             },
             {
                 label: 'Historical VaR',
-                value: (Math.abs(data.historical_var_95) * 100).toFixed(2),
+                value: (Math.abs(data.historical_var_95 || 0) * 100).toFixed(2),
                 format: 'percentage',
                 sub: '95% · Daily',
                 icon: <TrendingDown size={16} />,

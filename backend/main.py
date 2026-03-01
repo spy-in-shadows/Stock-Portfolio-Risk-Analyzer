@@ -142,95 +142,30 @@ async def analyze_portfolio(
                 detail="CSV has fewer than 2 columns. Ensure it is a valid broker export."
             )
 
-        # ── 2. Parse holdings + fetch prices + align ─────────────────
+        # 2. Parse holdings + fetch prices + align benchmark
         (
-            asset_returns, bench_returns, weights,
-            asset_names, portfolio_value, start_date, end_date
+            asset_returns, bench_returns, weights, asset_names, 
+            portfolio_value, start_date, end_date
         ) = preprocess_broker_data(
             df=df,
             benchmark_ticker=benchmark_ticker,
             history_days=history_days
         )
 
-        # ── 3. Run core risk engine ──────────────────────────────────
-        #    Only compute full risk metrics if single benchmark is provided
-        #    (MC simulation and Beta require a benchmark)
-        risk_results = {}
-        if bench_returns is not None:
-            risk_results = get_risk_metrics(
-                asset_returns=asset_returns,
-                bench_returns=bench_returns,
-                benchmark_ticker=benchmark_ticker,
-                asset_names=asset_names,
-                weights=weights,
-                portfolio_value=portfolio_value,
-                risk_free_rate=risk_free_rate,
-                confidence_level=confidence_level,
-                simulations=simulations
-            )
-        else:
-            # Minimal risk metrics without benchmark alignment
-            w = np.array(weights)
-            if not np.isclose(w.sum(), 1.0):
-                w = w / w.sum()
-            mean_returns = asset_returns.mean().fillna(0)
-            cov_matrix = asset_returns.cov().fillna(0)
-            corr_matrix = asset_returns.corr().fillna(0)
-            port_return = float(np.dot(w, mean_returns))
-            port_vol = float(np.sqrt(w.T @ cov_matrix.values @ w))
-
-            risk_results = {
-                "portfolio_expected_return": port_return,
-                "portfolio_volatility": port_vol,
-                "historical_var_95": None,
-                "parametric_var_95": None,
-                "monte_carlo_var_95": None,
-                "monte_carlo_expected_return_30d": None,
-                "monte_carlo_volatility_30d": None,
-                "monte_carlo_var95_30d": None,
-                "beta": None,
-                "correlation_matrix": corr_matrix.values.tolist(),
-                "asset_names": asset_names,
-                "benchmark_ticker": benchmark_ticker,
-                "mc_chart_data": []
-            }
-
-        # ── 4. Build blended benchmark returns (if requested) ────────
-        blended_returns = None
-        if blended_config:
-            blended_returns = build_blended_benchmark_returns(
-                tickers=blended_config.tickers,
-                weights=blended_config.weights,
-                start_date=start_date,
-                end_date=end_date,
-            )
-
-        # ── 5. Compute portfolio daily returns for comparison ────────
-        w_arr = np.array(weights)
-        port_daily_returns = pd.Series(
-            np.dot(asset_returns.values, w_arr),
-            index=asset_returns.index,
-            name="portfolio"
-        )
-
-        # ── 6. Performance comparison ────────────────────────────────
-        comparison = compare_performance(
-            portfolio_returns=port_daily_returns,
-            benchmark_returns=bench_returns,
-            blended_returns=blended_returns,
+        # 3. Run risk engine
+        results = get_risk_metrics(
+            asset_returns=asset_returns,
+            bench_returns=bench_returns,
+            benchmark_ticker=benchmark_ticker,
+            asset_names=asset_names,
+            weights=weights,
+            portfolio_value=portfolio_value,
             risk_free_rate=risk_free_rate,
+            confidence_level=confidence_level,
+            simulations=simulations
         )
 
-        # ── 7. Build final response ──────────────────────────────────
-        response = {
-            "status": "success",
-            "start_date": start_date,
-            "end_date": end_date,
-            **risk_results,
-            "comparison": comparison
-        }
-
-        return response
+        return results
 
     except HTTPException as he:
         raise he
