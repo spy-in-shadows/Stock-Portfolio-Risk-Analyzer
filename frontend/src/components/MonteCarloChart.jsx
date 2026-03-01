@@ -21,7 +21,8 @@ const MonteCarloChart = ({ data: analysisData }) => {
                     path1: 100 * Math.exp(drift + diffusion * (Math.random() * 2.2 - 1.1)),
                     path2: 100 * Math.exp(drift + diffusion * (Math.random() * 2.5 - 1.8)),
                     path3: 100 * Math.exp(drift + diffusion * (Math.random() * 2.5 - 0.7)),
-                    median: 100 * Math.exp(mu * i),
+                    mean: 100 * Math.exp(mu * i),
+                    median: 100 * Math.exp(drift * i),
                     var95: 100 * Math.exp(drift - 1.645 * diffusion),
                     confidenceBand: [
                         100 * Math.exp(drift - 1.645 * diffusion),
@@ -44,7 +45,7 @@ const MonteCarloChart = ({ data: analysisData }) => {
                                 <div key={idx} className="flex justify-between items-center gap-4 font-mono">
                                     <span style={{ color: p.color || p.stroke }}>{p.name}:</span>
                                     <span className="text-slate-200">
-                                        {(p.value * 100).toFixed(2)}%
+                                        {(p.value - 100).toFixed(2)}%
                                     </span>
                                 </div>
                             );
@@ -92,7 +93,7 @@ const MonteCarloChart = ({ data: analysisData }) => {
                         <Line type="monotone" dataKey="path1" stroke="#3b82f6" strokeWidth={1} strokeOpacity={0.4} dot={false} name="Path 1" />
                         <Line type="monotone" dataKey="path2" stroke="#ef4444" strokeWidth={1} strokeOpacity={0.4} dot={false} name="Stress Path" />
                         <Line type="monotone" dataKey="path3" stroke="#10b981" strokeWidth={1} strokeOpacity={0.4} dot={false} name="Bull Path" />
-                        <Line type="monotone" dataKey="median" stroke="#e2e8f0" strokeWidth={2} dot={false} name="Expected (E[x])" />
+                        <Line type="monotone" dataKey="mean" stroke="#e2e8f0" strokeWidth={2} dot={false} name="Expected (E[x])" />
                         <Line type="monotone" dataKey="var95" stroke="#780606" strokeWidth={2} strokeDasharray="4 4" dot={false} name="Historical 5% VaR" />
                     </ComposedChart>
                 </ResponsiveContainer>

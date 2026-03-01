@@ -500,6 +500,7 @@ def generate_mc_forward_paths(
     for t in range(horizon + 1):
         day_vals = cumulative[:, t]             # shape (path_simulations,)
         p5, p10, p50, p90 = np.percentile(day_vals, [5, 10, 50, 90])
+        mean_val = np.mean(day_vals)            # True expected value E[X]
 
         result.append({
             "day":    t,
@@ -507,6 +508,7 @@ def generate_mc_forward_paths(
             "path2": round(float(cumulative[idx_10, t]), 4),  # True consistent stress path
             "path3": round(float(cumulative[idx_90, t]), 4),  # True consistent bull path
             "median": round(float(p50), 4),
+            "mean":   round(float(mean_val), 4),
             "var95":  round(float(p5), 4),
             "confidenceBand": [round(float(p10), 4), round(float(p90), 4)]
         })
