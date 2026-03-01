@@ -6,6 +6,7 @@ import CorrelationHeatmap from '../components/CorrelationHeatmap';
 import MonteCarloChart from '../components/MonteCarloChart';
 import ScenarioPanel from '../components/ScenarioPanel';
 import RiskGauge from '../components/RiskGauge';
+import BenchmarkComparison from '../components/BenchmarkComparison';
 
 const Dashboard = () => {
     const containerRef = useRef(null);
@@ -83,14 +84,19 @@ const Dashboard = () => {
                         <RiskMetrics data={analysisData} />
                     </div>
 
-                    {/* Middle/Bottom: Charts Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 flex-grow">
+                    {/* Middle: Charts Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="gsap-entry">
                             <MonteCarloChart data={analysisData} />
                         </div>
                         <div className="gsap-entry">
                             <CorrelationHeatmap matrix={analysisData?.correlation_matrix} assets={analysisData?.asset_names} />
                         </div>
+                    </div>
+
+                    {/* Bottom: Benchmark Comparison */}
+                    <div className="gsap-entry">
+                        <BenchmarkComparison data={analysisData} />
                     </div>
                 </div>
 
