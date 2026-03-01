@@ -6,12 +6,13 @@ import gsap from 'gsap';
 const RiskGauge = ({ value }) => {
     const [score, setScore] = useState(0);
 
-    // Convert VaR (e.g. 0.045) into a 0-100 score
-    // 0.01 (1%) -> 90 score
-    // 0.05 (5%) -> 50 score
-    // 0.10 (10%) -> 0 score
-    const targetScore = value
-        ? Math.max(0, Math.min(100, Math.round(100 - (Math.abs(value) * 1000))))
+    // Convert 30-Day VaR into a 0-100 score
+    // ~5% loss -> 88 score
+    // ~10% loss -> 68 score
+    // ~15% loss -> 48 score
+    // ~25% loss -> 8 score
+    const targetScore = (value !== undefined && value !== null)
+        ? Math.max(0, Math.min(100, Math.round(100 - ((Math.abs(value) - 0.02) * 400))))
         : 78; // Default fallback
 
     useEffect(() => {

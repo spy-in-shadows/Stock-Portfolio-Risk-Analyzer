@@ -339,9 +339,9 @@ def get_risk_metrics(
         weights = weights / weights.sum()
 
     # ── Statistical Components ──────────────────────────────────────
-    mean_returns = asset_returns.mean()
-    cov_matrix   = asset_returns.cov()
-    corr_matrix  = asset_returns.corr()
+    mean_returns = asset_returns.mean().fillna(0)
+    cov_matrix   = asset_returns.cov().fillna(0)
+    corr_matrix  = asset_returns.corr().fillna(0)
 
     # ── Portfolio Historical Returns: Rp = w · R ───────────────────
     port_hist_returns = np.dot(asset_returns.values, weights)
@@ -371,14 +371,15 @@ def get_risk_metrics(
         cov=cov_matrix.values,
         weights=weights,
         horizon=31,
-        path_simulations=5000
+        path_simulations=5000,
+        confidence_level=confidence_level
     )
 
     # ── Beta = Cov(Rp, Rm) / Var(Rm) ───────────────────────────────
     bench_arr = bench_returns.values
     cov_mat   = np.cov(port_hist_returns, bench_arr)
     cov_rp_rm = cov_mat[0, 1]
-    var_rm    = np.var(bench_arr)
+    var_rm    = np.var(bench_arr, ddof=1)
     beta      = cov_rp_rm / var_rm if var_rm > 0 else 1.0
 
     return {
@@ -465,7 +466,8 @@ def generate_mc_forward_paths(
     cov: np.ndarray,
     weights: np.ndarray,
     horizon: int = 31,
-    path_simulations: int = 5000
+    path_simulations: int = 5000,
+    confidence_level: float = 0.95
 ) -> list:
     """
     Multi-step compounding GBM paths for chart visualization.
@@ -496,10 +498,13 @@ def generate_mc_forward_paths(
     idx_10 = int(np.argmin(np.abs(end_vals - p10_end)))  # Stress path (P10)
     idx_90 = int(np.argmin(np.abs(end_vals - p90_end)))  # Bull path (P90)
 
+    # Confidence level percentile (e.g. 0.95 -> 5th percentile)
+    var_pct = (1 - confidence_level) * 100
+
     result = []
     for t in range(horizon + 1):
         day_vals = cumulative[:, t]             # shape (path_simulations,)
-        p5, p10, p50, p90 = np.percentile(day_vals, [5, 10, 50, 90])
+        p_var, p10, p50, p90 = np.percentile(day_vals, [var_pct, 10, 50, 90])
         mean_val = np.mean(day_vals)            # True expected value E[X]
 
         result.append({
@@ -509,7 +514,7 @@ def generate_mc_forward_paths(
             "path3": round(float(cumulative[idx_90, t]), 4),  # True consistent bull path
             "median": round(float(p50), 4),
             "mean":   round(float(mean_val), 4),
-            "var95":  round(float(p5), 4),
+            "var95":  round(float(p_var), 4),
             "confidenceBand": [round(float(p10), 4), round(float(p90), 4)]
         })
 

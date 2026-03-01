@@ -94,7 +94,7 @@ const MonteCarloChart = ({ data: analysisData }) => {
                         <Line type="monotone" dataKey="path2" stroke="#ef4444" strokeWidth={1} strokeOpacity={0.4} dot={false} name="Stress Path" />
                         <Line type="monotone" dataKey="path3" stroke="#10b981" strokeWidth={1} strokeOpacity={0.4} dot={false} name="Bull Path" />
                         <Line type="monotone" dataKey="mean" stroke="#e2e8f0" strokeWidth={2} dot={false} name="Expected (E[x])" />
-                        <Line type="monotone" dataKey="var95" stroke="#780606" strokeWidth={2} strokeDasharray="4 4" dot={false} name="Historical 5% VaR" />
+                        <Line type="monotone" dataKey="var95" stroke="#780606" strokeWidth={2} strokeDasharray="4 4" dot={false} name="Monte Carlo VaR" />
                     </ComposedChart>
                 </ResponsiveContainer>
             </div>
