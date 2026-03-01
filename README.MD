@@ -333,7 +333,7 @@ Multivariate Normal Monte Carlo Simulation for Portfolio Risk
 | Member Name | Role                  | Responsibilities                                          |
 | ----------- | --------------------- | --------------------------------------------------------- |
 | Krishna Verma    | Backend & Risk Engine | Statistical modeling, FastAPI, Monte Carlo implementation |
-| Sambudhha Banerjee    | Frontend              | UI/UX, dashboard visualization                            |
+| Sambuddha Banerjee    | Frontend              | UI/UX, dashboard visualization                            |
 | Aniruddha Dwivedi    | Core logic and Ideation  | Researching about various possible methods of Portfolio Analysis                         |
 
 ---
